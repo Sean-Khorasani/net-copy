@@ -107,6 +107,7 @@ set(COMMON_SOURCES
     src/logging/logger.cpp
     src/common/utils.cpp
     src/common/bandwidth_monitor.cpp
+    src/common/compression.cpp
 )
 
 # Add GPU source if CUDA is available, otherwise use CPU fallback
@@ -118,6 +119,7 @@ endif()
 
 # Create a static library for common components
 add_library(net_copy_common STATIC ${COMMON_SOURCES})
+target_link_libraries(net_copy_common PUBLIC lz4)
 
 # Set specific compilation flags for AES-CTR file to enable hardware acceleration
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
