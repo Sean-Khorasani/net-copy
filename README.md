@@ -22,7 +22,8 @@ On Windows use:
 build_vs_cli.bat
 ```
 Alternatively, create a `build` directory and run CMake manually.
-```cmd (MSYS2 MinGW)
+```cmd
+On Windows with MSYS2 MinGW
 rmdir /s /q build
 mkdir build
 cd build
