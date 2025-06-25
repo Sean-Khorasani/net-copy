@@ -47,6 +47,22 @@ private:
 };
 
 // Convenience macros
+#ifdef LOG_DEBUG
+#undef LOG_DEBUG
+#endif
+#ifdef LOG_INFO
+#undef LOG_INFO
+#endif
+#ifdef LOG_WARNING
+#undef LOG_WARNING
+#endif
+#ifdef LOG_ERROR
+#undef LOG_ERROR
+#endif
+#ifdef LOG_CRITICAL
+#undef LOG_CRITICAL
+#endif
+
 #define LOG_DEBUG(msg) netcopy::logging::Logger::instance().debug(msg)
 #define LOG_INFO(msg) netcopy::logging::Logger::instance().info(msg)
 #define LOG_WARNING(msg) netcopy::logging::Logger::instance().warning(msg)
