@@ -21,6 +21,11 @@ On Windows use:
 ```cmd (Visual Studio Build System)
 build_vs_cli.bat
 ```
+On Windows with NVIDIA GPU Computing Toolkit + Visual Studio
+```
+build_auto_detect.bat
+```
+
 Alternatively, create a `build` directory and run CMake manually.
 
 On Windows with MSYS2 MinGW
