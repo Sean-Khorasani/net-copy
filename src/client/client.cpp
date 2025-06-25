@@ -2,6 +2,7 @@
 #include "file/file_manager.h"
 #include "logging/logger.h"
 #include "common/utils.h"
+#include "common/compression.h"
 #include "exceptions.h"
 #include "crypto/crypto_engine.h"
 #include <filesystem>
@@ -504,6 +505,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
 
 void Client::send_file_data(const std::string& file_path, uint64_t resume_offset, uint64_t total_size) {
     uint64_t bytes_sent = resume_offset;
+    bool compress = common::is_compressible(file_path);
     
     // Handle empty files (0 bytes) - still need to send one empty data chunk
     if (total_size == 0) {
@@ -532,12 +534,15 @@ void Client::send_file_data(const std::string& file_path, uint64_t resume_offset
     while (bytes_sent < total_size) {
         size_t chunk_size = std::min(static_cast<uint64_t>(config_.buffer_size), total_size - bytes_sent);
         auto chunk_data = file::FileManager::read_file_chunk(file_path, bytes_sent, chunk_size);
-        
+
+        std::vector<uint8_t> payload = compress ? common::compress_buffer(chunk_data) : chunk_data;
+
         protocol::FileData data_msg;
         data_msg.offset = bytes_sent;
-        data_msg.data = chunk_data;
+        data_msg.data = payload;
         data_msg.is_last_chunk = (bytes_sent + chunk_data.size() >= total_size);
-        
+        data_msg.compressed = compress;
+
         send_message(data_msg);
         
         // Receive acknowledgment

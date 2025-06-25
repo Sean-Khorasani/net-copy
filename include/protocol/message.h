@@ -105,10 +105,11 @@ public:
 class FileData : public Message {
 public:
     FileData();
-    
+
     uint64_t offset;
     std::vector<uint8_t> data;
     bool is_last_chunk;
+    bool compressed;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;

@@ -1,5 +1,4 @@
 #include "daemon/daemon.h"
-#include "logging/logger.h"
 #include "exceptions.h"
 
 #ifdef _WIN32
@@ -12,8 +11,17 @@
 #include <sys/stat.h>
 #include <signal.h>
 #include <fcntl.h>
+
 #include <syslog.h>
+#undef LOG_INFO
+#undef LOG_WARNING
+#undef LOG_DEBUG
+#undef LOG_ERR
+#undef LOG_ERROR
+#undef LOG_CRIT
 #endif
+
+#include "logging/logger.h"
 
 #include <fstream>
 #include <iostream>
