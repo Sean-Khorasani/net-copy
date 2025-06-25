@@ -257,13 +257,14 @@ void FileResponse::deserialize_payload(const std::vector<uint8_t>& data) {
 }
 
 // FileData implementation
-FileData::FileData() : Message(MessageType::FILE_DATA) {}
+FileData::FileData() : Message(MessageType::FILE_DATA), compressed(false) {}
 
 std::vector<uint8_t> FileData::serialize_payload() const {
     std::vector<uint8_t> buffer;
     write_uint64(buffer, offset);
     write_bytes(buffer, data);
     buffer.push_back(is_last_chunk ? 1 : 0);
+    buffer.push_back(compressed ? 1 : 0);
     return buffer;
 }
 
@@ -274,7 +275,11 @@ void FileData::deserialize_payload(const std::vector<uint8_t>& data_buffer) {
     if (offset_pos >= data_buffer.size()) {
         throw ProtocolException("Buffer underflow reading last chunk flag");
     }
-    is_last_chunk = data_buffer[offset_pos] != 0;
+    is_last_chunk = data_buffer[offset_pos++] != 0;
+    if (offset_pos >= data_buffer.size()) {
+        throw ProtocolException("Buffer underflow reading compression flag");
+    }
+    compressed = data_buffer[offset_pos] != 0;
 }
 
 // FileAck implementation

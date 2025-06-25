@@ -2,6 +2,7 @@
 #include "file/file_manager.h"
 #include "logging/logger.h"
 #include "common/utils.h"
+#include "common/compression.h"
 #include "daemon/daemon.h"
 #include "exceptions.h"
 #include <algorithm>
@@ -176,6 +177,11 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
         std::string filename = file::FileManager::get_filename(current_file_path_);
         bool is_marker_file = (filename == ".netcopy_dir_marker" || filename == ".netcopy_empty_dir");
         
+        std::vector<uint8_t> payload = data.data;
+        if (data.compressed) {
+            payload = common::decompress_buffer(data.data, config_.buffer_size);
+        }
+
         if (is_marker_file) {
             // This is an empty directory marker - just ensure the directory exists, don't create the file
             std::string dir = file::FileManager::get_directory(current_file_path_);
@@ -187,14 +193,13 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
             LOG_DEBUG("Processed directory marker, directory created but marker file not saved");
         } else {
             // Actually write the data to the file
-            file::FileManager::write_file_chunk(current_file_path_, data.offset, data.data);
+            file::FileManager::write_file_chunk(current_file_path_, data.offset, payload);
         }
-        
-        ack.bytes_received = data.offset + data.data.size();
+
+        ack.bytes_received = data.offset + payload.size();
         ack.success = true;
-        
-        LOG_DEBUG("Successfully processed " + std::to_string(data.data.size()) + " bytes");
-        
+        LOG_DEBUG("Successfully processed " + std::to_string(payload.size()) + " bytes");
+
     } catch (const std::exception& e) {
         ack.success = false;
         ack.error_message = e.what();
