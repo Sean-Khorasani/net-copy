@@ -22,8 +22,9 @@ On Windows use:
 build_vs_cli.bat
 ```
 Alternatively, create a `build` directory and run CMake manually.
-```cmd
+
 On Windows with MSYS2 MinGW
+```cmd
 rmdir /s /q build
 mkdir build
 cd build
@@ -50,7 +51,8 @@ Enter a master password when prompted and copy the generated key to both configu
 ./net_copy_server --daemon --config /etc/net_copy/server.conf
 ```
 
-```Windows Service
+Windows Service
+```
 net_copy_service.exe install
 
 Use 'net start NetCopyServer' or 'net_copy_service.exe start' to start the service.
