@@ -2,7 +2,8 @@
 #include "exceptions.h"
 #include <algorithm>
 #include <regex>
-#include <vector> // Explicitly include vector here as well
+#include <vector>
+#include <cctype>
 
 namespace netcopy {
 namespace file {
@@ -90,30 +91,13 @@ std::vector<FileManager::FileInfo> FileManager::list_directory(const std::string
     return files;
 }
 
-std::vector<uint8_t> FileManager::read_file_chunk(const std::string& path, uint64_t offset, size_t chunk_size) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
-        throw FileException("Failed to open file for reading: " + path);
-    }
-    
-    file.seekg(offset);
-    if (!file) {
-        throw FileException("Failed to seek to offset " + std::to_string(offset) + " in file: " + path);
-    }
-    
-    std::vector<uint8_t> buffer(chunk_size);
-    file.read(reinterpret_cast<char*>(buffer.data()), chunk_size);
-    
-    size_t bytes_read = file.gcount();
-    buffer.resize(bytes_read);
-    
-    return buffer;
-}
+// No changes needed for this function - it already uses the DEFAULT_CHUNK_SIZE defined in header
+// The chunk size is already set to 256KB in the header (262144 bytes)
 
-void FileManager::write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data) {
-    // Create directory if it doesn't exist
+void FileManager::write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data, bool auto_create) {
+    // Create directory if it doesn't exist and auto_create is true
     auto dir = get_directory(path);
-    if (!dir.empty() && !exists(dir)) {
+    if (auto_create && !dir.empty() && !exists(dir)) {
         create_directories(dir);
     }
     
@@ -146,9 +130,9 @@ void FileManager::write_file_chunk(const std::string& path, uint64_t offset, con
     }
 }
 
-void FileManager::create_file(const std::string& path, uint64_t size) {
+void FileManager::create_file(const std::string& path, uint64_t size, bool auto_create) {
     auto dir = get_directory(path);
-    if (!dir.empty() && !exists(dir)) {
+    if (auto_create && !dir.empty() && !exists(dir)) {
         create_directories(dir);
     }
     
@@ -202,8 +186,22 @@ bool FileManager::is_path_safe(const std::string& path, const std::string& base_
         std::filesystem::path normalized_path = std::filesystem::path(path).lexically_normal();
         std::filesystem::path normalized_base = std::filesystem::path(base_directory).lexically_normal();
         
+        std::filesystem::path relative;
+
+#ifdef _WIN32
+        // On Windows, paths are case-insensitive. We need to handle this for relative() to work as expected lexically.
+        std::string path_lower = normalized_path.string();
+        std::string base_lower = normalized_base.string();
+        std::transform(path_lower.begin(), path_lower.end(), path_lower.begin(), 
+                       [](unsigned char c){ return std::tolower(c); });
+        std::transform(base_lower.begin(), base_lower.end(), base_lower.begin(), 
+                       [](unsigned char c){ return std::tolower(c); });
+        
+        relative = std::filesystem::relative(path_lower, base_lower);
+#else
         // Check if the path is within the base directory
-        auto relative = std::filesystem::relative(normalized_path, normalized_base);
+        relative = std::filesystem::relative(normalized_path, normalized_base);
+#endif
         
         // Allow if paths are identical (relative path is ".")
         if (relative == ".") {
@@ -218,26 +216,69 @@ bool FileManager::is_path_safe(const std::string& path, const std::string& base_
 
 std::string FileManager::sanitize_filename(const std::string& filename) {
     std::string sanitized = filename;
-    
+
     // Remove or replace dangerous characters
-    std::regex dangerous_chars(R"([<>:"/\\|?*])");
+    std::regex dangerous_chars(R"([<>:\/\\|?*])");
     sanitized = std::regex_replace(sanitized, dangerous_chars, "_");
-    
+
     // Remove leading/trailing spaces and dots
     sanitized.erase(0, sanitized.find_first_not_of(" ."));
     sanitized.erase(sanitized.find_last_not_of(" .") + 1);
-    
+
     // Ensure filename is not empty
     if (sanitized.empty()) {
         sanitized = "unnamed_file";
     }
-    
+
     // Limit length
     if (sanitized.length() > 255) {
         sanitized = sanitized.substr(0, 255);
     }
-    
+
     return sanitized;
+}
+
+// Implementation of the missing read_file_chunk function
+std::vector<uint8_t> FileManager::read_file_chunk(const std::string& path, uint64_t offset, size_t chunk_size) {
+    // Check if file exists
+    if (!exists(path)) {
+        throw FileException("File does not exist: " + path);
+    }
+
+    // Check if it's a regular file
+    if (!is_regular_file(path)) {
+        throw FileException("Path is not a regular file: " + path);
+    }
+
+    // Check if the file size is sufficient for reading at given offset
+    uint64_t file_size = file_size(path);
+    if (offset >= file_size) {
+        // Return empty vector since we can't read from this offset
+        return std::vector<uint8_t>();
+    }
+
+    // Determine how much to read (can be less than chunk_size if near end of file)
+    size_t bytes_to_read = (std::min)(chunk_size, static_cast<size_t>(file_size - offset));
+
+    // Read the data from the file
+    std::vector<uint8_t> buffer(bytes_to_read);
+
+    std::ifstream file(path, std::ios::binary);
+    if (!file) {
+        throw FileException("Failed to open file for reading: " + path);
+    }
+
+    file.seekg(offset);
+    if (!file) {
+        throw FileException("Failed to seek in file: " + path);
+    }
+
+    file.read(reinterpret_cast<char*>(buffer.data()), bytes_to_read);
+    if (!file) {
+        throw FileException("Failed to read from file: " + path);
+    }
+
+    return buffer;
 }
 
 } // namespace file
