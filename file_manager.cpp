@@ -37,11 +37,7 @@ uint64_t FileManager::file_size(const std::string& path) {
 }
 
 void FileManager::create_directories(const std::string& path) {
-    std::error_code ec;
-    std::filesystem::create_directories(path, ec);
-    if (ec) {
-        throw FileException("Failed to create directories: " + path + ", error: " + ec.message());
-    }
+    std::filesystem::create_directories(path);
 }
 
 void FileManager::write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data, bool auto_create) {
