@@ -66,9 +66,8 @@ struct ServerConfig {
     uint64_t max_file_size;
     
     // Performance settings
-    size_t buffer_size;
     int max_bandwidth_percent;
-    int thread_pool_size;
+    size_t max_chunk_size;
     
     // Logging settings
     std::string log_level;
@@ -81,6 +80,7 @@ struct ServerConfig {
     
     // Path settings
     std::vector<std::string> allowed_paths;
+    bool auto_create_directories;
     
     static ServerConfig load_from_file(const std::string& filename);
     static ServerConfig get_default();
@@ -92,10 +92,14 @@ struct ClientConfig {
     std::string secret_key;
     
     // Performance settings
-    size_t buffer_size;
     int max_bandwidth_percent;
     int retry_attempts;
     int retry_delay;
+    size_t initial_chunk_size;
+    size_t min_chunk_size;
+    size_t max_chunk_size;
+    double chunk_size_increase_factor; // New: default to 1.1
+    double chunk_size_decrease_factor; // New: default to 0.5
     
     // Logging settings
     std::string log_level;
@@ -108,6 +112,7 @@ struct ClientConfig {
     
     // Transfer settings
     bool create_empty_directories;
+    bool auto_create_directories;
     
     static ClientConfig load_from_file(const std::string& filename);
     static ClientConfig get_default();

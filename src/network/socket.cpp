@@ -1,6 +1,15 @@
 #include "network/socket.h"
 #include "exceptions.h"
 #include <cstring>
+#include <limits>
+#include <algorithm>
+
+#ifdef _WIN32
+#include <basetsd.h>
+typedef SSIZE_T ssize_t;
+#else
+#include <netinet/tcp.h>
+#endif
 
 namespace netcopy {
 namespace network {
@@ -142,7 +151,8 @@ void Socket::connect(const std::string& address, uint16_t port) {
 }
 
 size_t Socket::send(const void* data, size_t length) {
-    ssize_t bytes_sent = ::send(socket_, static_cast<const char*>(data), length, 0);
+    int send_len = static_cast<int>((std::min)(length, static_cast<size_t>((std::numeric_limits<int>::max)())));
+    ssize_t bytes_sent = ::send(socket_, static_cast<const char*>(data), send_len, 0);
     if (bytes_sent == SOCKET_ERROR_VALUE) {
         throw NetworkException("Failed to send data");
     }
@@ -150,7 +160,8 @@ size_t Socket::send(const void* data, size_t length) {
 }
 
 size_t Socket::receive(void* buffer, size_t length) {
-    ssize_t bytes_received = ::recv(socket_, static_cast<char*>(buffer), length, 0);
+    int recv_len = static_cast<int>((std::min)(length, static_cast<size_t>((std::numeric_limits<int>::max)())));
+    ssize_t bytes_received = ::recv(socket_, static_cast<char*>(buffer), recv_len, 0);
     if (bytes_received == SOCKET_ERROR_VALUE) {
         throw NetworkException("Failed to receive data");
     }
@@ -230,6 +241,27 @@ void Socket::set_timeout(int seconds) {
         throw NetworkException("Failed to set socket timeout");
     }
 #endif
+}
+
+void Socket::set_tcp_nodelay(bool enable) {
+    int opt_val = enable ? 1 : 0;
+    if (setsockopt(socket_, IPPROTO_TCP, TCP_NODELAY,
+                   reinterpret_cast<const char*>(&opt_val), sizeof(opt_val)) == SOCKET_ERROR_VALUE) {
+        throw NetworkException("Failed to set TCP_NODELAY");
+    }
+}
+
+void Socket::set_buffer_sizes(size_t send_size, size_t recv_size) {
+    int snd_val = static_cast<int>(send_size);
+    int rcv_val = static_cast<int>(recv_size);
+    if (setsockopt(socket_, SOL_SOCKET, SO_SNDBUF,
+                   reinterpret_cast<const char*>(&snd_val), sizeof(snd_val)) == SOCKET_ERROR_VALUE) {
+        throw NetworkException("Failed to set SO_SNDBUF");
+    }
+    if (setsockopt(socket_, SOL_SOCKET, SO_RCVBUF,
+                   reinterpret_cast<const char*>(&rcv_val), sizeof(rcv_val)) == SOCKET_ERROR_VALUE) {
+        throw NetworkException("Failed to set SO_RCVBUF");
+    }
 }
 
 bool Socket::is_valid() const {

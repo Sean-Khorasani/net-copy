@@ -1,5 +1,6 @@
 #include "daemon/daemon.h"
 #include "exceptions.h"
+#include <csignal>
 
 #ifdef _WIN32
 #include <windows.h> // For FreeConsole, HANDLE, OpenProcess, CloseHandle, GetCurrentProcessId

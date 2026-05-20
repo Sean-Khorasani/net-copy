@@ -89,6 +89,8 @@ elseif(MSVC)
     # MSVC doesn't need explicit flags for AES-NI (enabled by default on x64)
     # But we can add /arch:AVX2 for better SIMD performance
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2")
+    add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS)
+    add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif()
 
 # Common include directories
@@ -107,6 +109,8 @@ set(COMMON_SOURCES
     src/logging/logger.cpp
     src/common/utils.cpp
     src/common/bandwidth_monitor.cpp
+    src/common/bandwidth_limiter.cpp
+    src/common/chunk_size_manager.cpp
     src/common/compression.cpp
 )
 
@@ -119,7 +123,26 @@ endif()
 
 # Create a static library for common components
 add_library(net_copy_common STATIC ${COMMON_SOURCES})
-target_link_libraries(net_copy_common PUBLIC lz4)
+
+# Try to find LZ4, otherwise continue without it (compression.cpp handles this)
+# Prefer vcpkg/CONFIG package if available
+find_package(lz4 CONFIG QUIET)
+if(lz4_FOUND)
+    target_link_libraries(net_copy_common PUBLIC lz4::lz4)
+    message(STATUS "LZ4 package found (vcpkg) - compression will be enabled")
+else()
+    # Fallback to manual finding
+    find_library(LZ4_LIBRARY NAMES lz4)
+    find_path(LZ4_INCLUDE_DIR NAMES lz4.h)
+
+    if(LZ4_LIBRARY AND LZ4_INCLUDE_DIR)
+        target_link_libraries(net_copy_common PUBLIC ${LZ4_LIBRARY})
+        target_include_directories(net_copy_common PUBLIC ${LZ4_INCLUDE_DIR})
+        message(STATUS "LZ4 library found - compression will be enabled")
+    else()
+        message(WARNING "LZ4 library not found - compression will be disabled")
+    endif()
+endif()
 
 # Set specific compilation flags for AES-CTR file to enable hardware acceleration
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")

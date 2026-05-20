@@ -1,5 +1,8 @@
 #include "common/compression.h"
+#if __has_include(<lz4.h>)
 #include <lz4.h>
+#define HAS_LZ4
+#endif
 #include <algorithm>
 #include <filesystem>
 #include <stdexcept>
@@ -17,6 +20,9 @@ bool has_extension(const std::string& path, const std::vector<std::string>& exts
 } // namespace
 
 bool is_compressible(const std::string& path) {
+#ifndef HAS_LZ4
+    return false;
+#endif
     static const std::vector<std::string> non_compressible = {
         ".jpg", ".jpeg", ".png", ".gif", ".mp3", ".mp4", ".avi",
         ".zip", ".gz", ".bz2", ".rar", ".7z", ".lz4", ".pdf",
@@ -26,6 +32,7 @@ bool is_compressible(const std::string& path) {
 }
 
 std::vector<uint8_t> compress_buffer(const std::vector<uint8_t>& data) {
+#ifdef HAS_LZ4
     int max_dst = LZ4_compressBound(static_cast<int>(data.size()));
     std::vector<uint8_t> out(max_dst);
     int compressed_size = LZ4_compress_default(
@@ -38,9 +45,13 @@ std::vector<uint8_t> compress_buffer(const std::vector<uint8_t>& data) {
     }
     out.resize(compressed_size);
     return out;
+#else
+    return data;
+#endif
 }
 
 std::vector<uint8_t> decompress_buffer(const std::vector<uint8_t>& data, size_t original_size) {
+#ifdef HAS_LZ4
     std::vector<uint8_t> out(original_size);
     int decompressed = LZ4_decompress_safe(
         reinterpret_cast<const char*>(data.data()),
@@ -52,6 +63,12 @@ std::vector<uint8_t> decompress_buffer(const std::vector<uint8_t>& data, size_t 
     }
     out.resize(decompressed);
     return out;
+#else
+    if (data.size() != original_size) {
+         throw std::runtime_error("LZ4 decompression failed: LZ4 not available but data seems compressed");
+    }
+    return data;
+#endif
 }
 
 } // namespace common

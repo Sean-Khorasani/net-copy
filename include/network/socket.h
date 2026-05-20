@@ -54,6 +54,8 @@ public:
     void set_reuse_address(bool enable);
     void set_non_blocking(bool enable);
     void set_timeout(int seconds);
+    void set_tcp_nodelay(bool enable);
+    void set_buffer_sizes(size_t send_size, size_t recv_size);
 
     // Status
     bool is_valid() const;

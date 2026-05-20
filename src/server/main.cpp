@@ -25,6 +25,8 @@ void print_usage(const char* program_name) {
 #ifdef _WIN32
     std::cout << "                             Note: On Windows, use 'start /B' for background execution" << std::endl;
 #endif
+    std::cout << "  --auto-create              Automatically create non-existent directories (default)" << std::endl;
+    std::cout << "  --no-auto-create           Disable automatic directory creation" << std::endl;
     std::cout << "  -v, --verbose              Enable verbose logging" << std::endl;
     std::cout << "  -h, --help                 Show this help message" << std::endl << std::endl;
     
@@ -48,6 +50,8 @@ struct CommandLineArgs {
     std::string config_file;
     bool daemon = false;
     bool daemon_child = false; // Flag to indicate this is already a daemon child process
+    bool auto_create_directories = true;
+    bool auto_create_specified = false;
     bool verbose = false;
     bool help = false;
 };
@@ -121,6 +125,12 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
             args.daemon = true;
         } else if (arg == "--daemon-child") {
             args.daemon_child = true;
+        } else if (arg == "--auto-create") {
+            args.auto_create_directories = true;
+            args.auto_create_specified = true;
+        } else if (arg == "--no-auto-create") {
+            args.auto_create_directories = false;
+            args.auto_create_specified = true;
         } else if (arg == "-v" || arg == "--verbose") {
             args.verbose = true;
         } else {
@@ -161,12 +171,12 @@ int server_main(int argc, char* argv[]) {
                     server.load_config(default_config);
                     config_path_used = default_config;
                 } else {
-                    std::cout << "No configuration file loaded. Using default settings." << std::endl;
+                    LOG_INFO("No configuration file loaded. Using default settings.");
                     config_path_used = "(default settings)";
                 }
             }
         }
-        std::cout << "Using server configuration from: " << config_path_used << std::endl;
+        LOG_INFO("Using server configuration from: " + config_path_used);
         
         // Override config with command line arguments
         auto config = server.get_config();
@@ -187,6 +197,9 @@ int server_main(int argc, char* argv[]) {
         if (args.verbose) {
             config.log_level = "DEBUG";
             // Note: In daemon mode, verbose still disables console output
+        }
+        if (args.auto_create_specified) {
+            config.auto_create_directories = args.auto_create_directories;
         }
 
         // Prompt for secret key if not found in config
@@ -228,4 +241,3 @@ int server_main(int argc, char* argv[]) {
 int main(int argc, char* argv[]) {
     return server_main(argc, argv);
 }
-

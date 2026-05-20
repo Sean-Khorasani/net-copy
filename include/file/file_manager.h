@@ -30,13 +30,34 @@ public:
     static std::vector<FileInfo> list_directory(const std::string& path, bool recursive = false);
     
     // File I/O
-    static std::vector<uint8_t> read_file_chunk(const std::string& path, uint64_t offset, size_t chunk_size);
-    static void write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data);
-    static void create_file(const std::string& path, uint64_t size = 0);
+    static std::vector<uint8_t> read_file_chunk(const std::string& path, uint64_t offset, size_t chunk_size = 0);
+    static void write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data, bool auto_create = true, bool truncate_on_zero = true);
+    static void create_file(const std::string& path, uint64_t size = 0, bool auto_create = true);
     
     // Resume support
     static uint64_t get_partial_file_size(const std::string& path);
     static bool is_transfer_complete(const std::string& path, uint64_t expected_size);
+    
+    // Synchronization support
+    enum class ConflictResolution {
+        OVERWRITE,
+        KEEP_BOTH,
+        SKIP
+    };
+    
+    struct SyncState {
+        std::string local_path;
+        std::string remote_path;
+        uint64_t last_sync_time;
+        bool is_up_to_date;
+        std::vector<FileInfo> files_to_transfer;
+        ConflictResolution conflict_policy;
+    };
+    
+    // Directory comparison methods for synchronization
+    static std::vector<FileInfo> compare_directories(const std::string& local_dir, const std::string& remote_dir);
+    static std::vector<FileInfo> find_differences(const std::string& local_dir, const std::string& remote_dir);
+    static void resolve_conflict(const FileInfo& file_info, ConflictResolution resolution);
     
     // Path utilities
     static std::string normalize_path(const std::string& path);
@@ -49,9 +70,40 @@ public:
     static std::string sanitize_filename(const std::string& filename);
 
 private:
-    static constexpr size_t DEFAULT_CHUNK_SIZE = 65536; // 64KB
+    static constexpr size_t DEFAULT_CHUNK_SIZE = 262144; // 256KB
+};
+
+class FileStream {
+public:
+    FileStream();
+    ~FileStream();
+    
+    // Non-copyable
+    FileStream(const FileStream&) = delete;
+    FileStream& operator=(const FileStream&) = delete;
+    
+    // Movable
+    FileStream(FileStream&& other) noexcept;
+    FileStream& operator=(FileStream&& other) noexcept;
+    
+    bool open_read(const std::string& path);
+    bool open_write(const std::string& path, bool truncate_on_zero = true, bool auto_create = true);
+    
+    size_t read(uint64_t offset, uint8_t* buffer, size_t size);
+    void write(uint64_t offset, const uint8_t* data, size_t size);
+    
+    void close();
+    bool is_open() const;
+    std::string get_path() const { return path_; }
+
+private:
+#ifdef _WIN32
+    void* file_handle_;
+#else
+    int fd_;
+#endif
+    std::string path_;
 };
 
 } // namespace file
 } // namespace netcopy
-

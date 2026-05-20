@@ -288,10 +288,10 @@ ChaCha20Poly1305::Key ChaCha20Poly1305::generate_key() {
     Key key;
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<uint8_t> dis(0, 255);
+    std::uniform_int_distribution<uint16_t> dis(0, 255);
     
     for (auto& byte : key) {
-        byte = dis(gen);
+        byte = static_cast<uint8_t>(dis(gen));
     }
     
     return key;
@@ -301,10 +301,10 @@ ChaCha20Poly1305::Nonce ChaCha20Poly1305::generate_nonce() {
     Nonce nonce;
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<uint8_t> dis(0, 255);
+    std::uniform_int_distribution<uint16_t> dis(0, 255);
     
     for (auto& byte : nonce) {
-        byte = dis(gen);
+        byte = static_cast<uint8_t>(dis(gen));
     }
     
     return nonce;

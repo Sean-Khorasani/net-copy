@@ -232,9 +232,8 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
     config.require_auth = parser.get_bool("security", "require_auth", true);
     config.max_file_size = parser.get_uint64("security", "max_file_size", 1073741824);
     
-    config.buffer_size = static_cast<size_t>(parser.get_int("performance", "buffer_size", 65536));
-    config.max_bandwidth_percent = parser.get_int("performance", "max_bandwidth_percent", 40);
-    config.thread_pool_size = parser.get_int("performance", "thread_pool_size", 4);
+    config.max_bandwidth_percent = parser.get_int("performance", "max_bandwidth_percent", 0);
+    config.max_chunk_size = static_cast<size_t>(parser.get_int("performance", "max_chunk_size", 10485760));
     
     config.log_level = parser.get_string("logging", "log_level", "INFO");
     config.log_file = parser.get_string("logging", "log_file", "server.log");
@@ -244,6 +243,10 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
     config.pid_file = parser.get_string("daemon", "pid_file", "/var/run/net_copy_server.pid");
     
     config.allowed_paths = parser.get_string_list("paths", "allowed_paths", {"/var/lib/net_copy"});
+    for (auto& p : config.allowed_paths) {
+        p = common::convert_to_native_path(p);
+    }
+    config.auto_create_directories = parser.get_bool("paths", "auto_create_directories", true);
     
     return config;
 }
@@ -259,9 +262,8 @@ ServerConfig ServerConfig::get_default() {
     config.require_auth = true;
     config.max_file_size = 1073741824;
     
-    config.buffer_size = 65536;
-    config.max_bandwidth_percent = 40;
-    config.thread_pool_size = 4;
+    config.max_bandwidth_percent = 0;
+    config.max_chunk_size = 10485760;
     
     config.log_level = "INFO";
     config.log_file = "server.log";
@@ -271,6 +273,7 @@ ServerConfig ServerConfig::get_default() {
     config.pid_file = "/var/run/net_copy_server.pid";
     
     config.allowed_paths = {"/var/lib/net_copy"};
+    config.auto_create_directories = true;
     
     return config;
 }
@@ -283,10 +286,14 @@ ClientConfig ClientConfig::load_from_file(const std::string& filename) {
     ClientConfig config;
     config.secret_key = parser.get_string("security", "secret_key", "");
     
-    config.buffer_size = static_cast<size_t>(parser.get_int("performance", "buffer_size", 65536));
-    config.max_bandwidth_percent = parser.get_int("performance", "max_bandwidth_percent", 40);
+    config.max_bandwidth_percent = parser.get_int("performance", "max_bandwidth_percent", 0);
     config.retry_attempts = parser.get_int("performance", "retry_attempts", 3);
     config.retry_delay = parser.get_int("performance", "retry_delay", 5);
+    config.initial_chunk_size = static_cast<size_t>(parser.get_int("performance", "initial_chunk_size", 262144));
+    config.min_chunk_size = static_cast<size_t>(parser.get_int("performance", "min_chunk_size", 8192));
+    config.max_chunk_size = static_cast<size_t>(parser.get_int("performance", "max_chunk_size", 10485760));
+    config.chunk_size_increase_factor = std::stod(parser.get_string("performance", "chunk_size_increase_factor", "1.1"));
+    config.chunk_size_decrease_factor = std::stod(parser.get_string("performance", "chunk_size_decrease_factor", "0.5"));
     
     config.log_level = parser.get_string("logging", "log_level", "INFO");
     config.log_file = parser.get_string("logging", "log_file", "client.log");
@@ -297,6 +304,7 @@ ClientConfig ClientConfig::load_from_file(const std::string& filename) {
     
     // Transfer settings
     config.create_empty_directories = parser.get_bool("transfer", "create_empty_directories", true);
+    config.auto_create_directories = parser.get_bool("transfer", "auto_create_directories", true);
     
     return config;
 }
@@ -305,10 +313,14 @@ ClientConfig ClientConfig::get_default() {
     ClientConfig config;
     config.secret_key = "";
     
-    config.buffer_size = 65536;
-    config.max_bandwidth_percent = 40;
+    config.max_bandwidth_percent = 0;
     config.retry_attempts = 3;
     config.retry_delay = 5;
+    config.initial_chunk_size = 262144;
+    config.min_chunk_size = 8192;
+    config.max_chunk_size = 10485760;
+    config.chunk_size_increase_factor = 1.1;
+    config.chunk_size_decrease_factor = 0.5;
     
     config.log_level = "INFO";
     config.log_file = "client.log";
@@ -319,6 +331,7 @@ ClientConfig ClientConfig::get_default() {
     
     // Transfer settings defaults
     config.create_empty_directories = true;  // Default to true
+    config.auto_create_directories = true;
     
     return config;
 }

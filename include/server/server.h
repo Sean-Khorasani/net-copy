@@ -5,6 +5,7 @@
 #include "crypto/crypto_engine.h"
 #include "config/config_parser.h"
 #include "protocol/message.h"
+#include "file/file_manager.h"
 #include <memory>
 #include <string>
 #include <thread>
@@ -33,6 +34,11 @@ private:
     std::string client_address_;
     std::string current_file_path_;  // Track the current file being transferred
     bool handshake_completed_;  // Track if handshake is done
+    bool current_auto_create_;
+    bool current_truncate_on_zero_;
+    bool current_transfer_completed_;
+    size_t negotiated_max_chunk_size_;
+    file::FileStream current_file_stream_;
     
     // Protocol handling
     void perform_handshake();

@@ -1,9 +1,18 @@
 #include "file/file_manager.h"
+#include "common/chunk_size_manager.h"
 #include "exceptions.h"
 #include <algorithm>
 #include <regex>
 #include <vector>
 #include <cctype>
+#include <limits>
+#ifdef _WIN32
+#define NOMINMAX
+#include <windows.h>
+#else
+#include <unistd.h>
+#include <fcntl.h>
+#endif
 
 namespace netcopy {
 namespace file {
@@ -94,17 +103,59 @@ std::vector<FileManager::FileInfo> FileManager::list_directory(const std::string
 // No changes needed for this function - it already uses the DEFAULT_CHUNK_SIZE defined in header
 // The chunk size is already set to 256KB in the header (262144 bytes)
 
-void FileManager::write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data, bool auto_create) {
+void FileManager::write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data, bool auto_create, bool truncate_on_zero) {
     // Create directory if it doesn't exist and auto_create is true
     auto dir = get_directory(path);
     if (auto_create && !dir.empty() && !exists(dir)) {
         create_directories(dir);
     }
+
+#ifdef _WIN32
+    {
+    DWORD disposition = (offset == 0 && truncate_on_zero) ? CREATE_ALWAYS : OPEN_ALWAYS;
+    HANDLE file_handle = CreateFileA(path.c_str(),
+                                     GENERIC_WRITE,
+                                     FILE_SHARE_READ,
+                                     nullptr,
+                                     disposition,
+                                     FILE_ATTRIBUTE_NORMAL,
+                                     nullptr);
+    if (file_handle == INVALID_HANDLE_VALUE) {
+        throw FileException("Failed to open file for writing: " + path);
+    }
+
+    LARGE_INTEGER position;
+    position.QuadPart = static_cast<LONGLONG>(offset);
+    if (!SetFilePointerEx(file_handle, position, nullptr, FILE_BEGIN)) {
+        CloseHandle(file_handle);
+        throw FileException("Failed to seek to offset " + std::to_string(offset) + " in file: " + path);
+    }
+
+    size_t total_written = 0;
+    while (total_written < data.size()) {
+        DWORD bytes_to_write = static_cast<DWORD>(
+            (std::min)(data.size() - total_written, static_cast<size_t>(std::numeric_limits<DWORD>::max())));
+        DWORD bytes_written = 0;
+        if (!WriteFile(file_handle, data.data() + total_written, bytes_to_write, &bytes_written, nullptr)) {
+            CloseHandle(file_handle);
+            throw FileException("Failed to write data to file: " + path);
+        }
+        if (bytes_written == 0) {
+            CloseHandle(file_handle);
+            throw FileException("Failed to write data to file: " + path);
+        }
+        total_written += bytes_written;
+    }
+
+    CloseHandle(file_handle);
+    return;
+    }
+#endif
     
     std::ios::openmode mode = std::ios::binary | std::ios::in | std::ios::out;
     
     // If starting from offset 0, truncate the file (non-resume mode)
-    if (offset == 0) {
+    if (offset == 0 && truncate_on_zero) {
         mode |= std::ios::trunc;
     }
     
@@ -240,6 +291,10 @@ std::string FileManager::sanitize_filename(const std::string& filename) {
 
 // Implementation of the missing read_file_chunk function
 std::vector<uint8_t> FileManager::read_file_chunk(const std::string& path, uint64_t offset, size_t chunk_size) {
+    if (chunk_size == 0) {
+        chunk_size = DEFAULT_CHUNK_SIZE;
+    }
+
     // Check if file exists
     if (!exists(path)) {
         throw FileException("File does not exist: " + path);
@@ -251,36 +306,257 @@ std::vector<uint8_t> FileManager::read_file_chunk(const std::string& path, uint6
     }
 
     // Check if the file size is sufficient for reading at given offset
-    uint64_t file_size = file_size(path);
-    if (offset >= file_size) {
+    uint64_t file_size_value = file_size(path);
+    if (offset >= file_size_value) {
         // Return empty vector since we can't read from this offset
         return std::vector<uint8_t>();
     }
 
     // Determine how much to read (can be less than chunk_size if near end of file)
-    size_t bytes_to_read = (std::min)(chunk_size, static_cast<size_t>(file_size - offset));
+    size_t bytes_to_read = static_cast<size_t>(
+        (std::min)(static_cast<uint64_t>(chunk_size), file_size_value - offset));
 
     // Read the data from the file
     std::vector<uint8_t> buffer(bytes_to_read);
+
+#ifdef _WIN32
+    {
+    HANDLE file_handle = CreateFileA(path.c_str(),
+                                     GENERIC_READ,
+                                     FILE_SHARE_READ,
+                                     nullptr,
+                                     OPEN_EXISTING,
+                                     FILE_ATTRIBUTE_NORMAL,
+                                     nullptr);
+    if (file_handle == INVALID_HANDLE_VALUE) {
+        throw FileException("Failed to open file for reading: " + path);
+    }
+
+    LARGE_INTEGER position;
+    position.QuadPart = static_cast<LONGLONG>(offset);
+    if (!SetFilePointerEx(file_handle, position, nullptr, FILE_BEGIN)) {
+        CloseHandle(file_handle);
+        throw FileException("Failed to seek to offset " + std::to_string(offset) + " in file: " + path);
+    }
+
+    size_t total_read = 0;
+    while (total_read < bytes_to_read) {
+        DWORD request = static_cast<DWORD>(
+            (std::min)(bytes_to_read - total_read, static_cast<size_t>(std::numeric_limits<DWORD>::max())));
+        DWORD bytes_read = 0;
+        if (!ReadFile(file_handle, buffer.data() + total_read, request, &bytes_read, nullptr)) {
+            CloseHandle(file_handle);
+            throw FileException("Failed to read from file: " + path);
+        }
+        if (bytes_read == 0) {
+            break;
+        }
+        total_read += bytes_read;
+    }
+
+    CloseHandle(file_handle);
+    buffer.resize(total_read);
+    return buffer;
+    }
+#endif
 
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         throw FileException("Failed to open file for reading: " + path);
     }
 
-    file.seekg(offset);
+    file.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
     if (!file) {
         throw FileException("Failed to seek in file: " + path);
     }
 
     file.read(reinterpret_cast<char*>(buffer.data()), bytes_to_read);
-    if (!file) {
+    std::streamsize bytes_read = file.gcount();
+    if (bytes_read < 0) {
+        throw FileException("Failed to read from file: " + path);
+    }
+    buffer.resize(static_cast<size_t>(bytes_read));
+    if (buffer.size() != bytes_to_read && !file.eof()) {
         throw FileException("Failed to read from file: " + path);
     }
 
     return buffer;
 }
 
+// FileStream implementation
+FileStream::FileStream()
+#ifdef _WIN32
+    : file_handle_(nullptr)
+#else
+    : fd_(-1)
+#endif
+{}
+
+FileStream::~FileStream() {
+    close();
+}
+
+// Move constructor
+FileStream::FileStream(FileStream&& other) noexcept
+#ifdef _WIN32
+    : file_handle_(other.file_handle_), path_(std::move(other.path_))
+#else
+    : fd_(other.fd_), path_(std::move(other.path_))
+#endif
+{
+#ifdef _WIN32
+    other.file_handle_ = nullptr;
+#else
+    other.fd_ = -1;
+#endif
+}
+
+// Move assignment operator
+FileStream& FileStream::operator=(FileStream&& other) noexcept {
+    if (this != &other) {
+        close();
+#ifdef _WIN32
+        file_handle_ = other.file_handle_;
+        other.file_handle_ = nullptr;
+#else
+        fd_ = other.fd_;
+        other.fd_ = -1;
+#endif
+        path_ = std::move(other.path_);
+    }
+    return *this;
+}
+
+bool FileStream::open_read(const std::string& path) {
+    close();
+    path_ = path;
+#ifdef _WIN32
+    HANDLE handle = CreateFileA(path.c_str(),
+                                GENERIC_READ,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr,
+                                OPEN_EXISTING,
+                                FILE_ATTRIBUTE_NORMAL,
+                                nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    file_handle_ = handle;
+#else
+    int fd = open(path.c_str(), O_RDONLY);
+    if (fd < 0) {
+        return false;
+    }
+    fd_ = fd;
+#endif
+    return true;
+}
+
+bool FileStream::open_write(const std::string& path, bool truncate_on_zero, bool auto_create) {
+    close();
+    path_ = path;
+    
+    if (auto_create) {
+        auto dir = FileManager::get_directory(path);
+        if (!dir.empty() && !FileManager::exists(dir)) {
+            FileManager::create_directories(dir);
+        }
+    }
+    
+#ifdef _WIN32
+    DWORD disposition = truncate_on_zero ? CREATE_ALWAYS : OPEN_ALWAYS;
+    HANDLE handle = CreateFileA(path.c_str(),
+                                GENERIC_WRITE,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                nullptr,
+                                disposition,
+                                FILE_ATTRIBUTE_NORMAL,
+                                nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+    file_handle_ = handle;
+#else
+    int flags = O_WRONLY | O_CREAT;
+    if (truncate_on_zero) {
+        flags |= O_TRUNC;
+    }
+    int fd = open(path.c_str(), flags, 0644);
+    if (fd < 0) {
+        return false;
+    }
+    fd_ = fd;
+#endif
+    return true;
+}
+
+size_t FileStream::read(uint64_t offset, uint8_t* buffer, size_t size) {
+    if (!is_open()) return 0;
+#ifdef _WIN32
+    HANDLE handle = static_cast<HANDLE>(file_handle_);
+    LARGE_INTEGER position;
+    position.QuadPart = static_cast<LONGLONG>(offset);
+    if (!SetFilePointerEx(handle, position, nullptr, FILE_BEGIN)) {
+        throw FileException("FileStream read failed to seek: " + path_);
+    }
+    
+    DWORD bytes_read = 0;
+    if (!ReadFile(handle, buffer, static_cast<DWORD>(size), &bytes_read, nullptr)) {
+        throw FileException("FileStream read failed: " + path_);
+    }
+    return static_cast<size_t>(bytes_read);
+#else
+    ssize_t res = pread(fd_, buffer, size, static_cast<off_t>(offset));
+    if (res < 0) {
+        throw FileException("FileStream read failed: " + path_);
+    }
+    return static_cast<size_t>(res);
+#endif
+}
+
+void FileStream::write(uint64_t offset, const uint8_t* data, size_t size) {
+    if (!is_open()) return;
+#ifdef _WIN32
+    HANDLE handle = static_cast<HANDLE>(file_handle_);
+    LARGE_INTEGER position;
+    position.QuadPart = static_cast<LONGLONG>(offset);
+    if (!SetFilePointerEx(handle, position, nullptr, FILE_BEGIN)) {
+        throw FileException("FileStream write failed to seek: " + path_);
+    }
+    
+    DWORD bytes_written = 0;
+    if (!WriteFile(handle, data, static_cast<DWORD>(size), &bytes_written, nullptr)) {
+        throw FileException("FileStream write failed: " + path_);
+    }
+#else
+    ssize_t res = pwrite(fd_, data, size, static_cast<off_t>(offset));
+    if (res < 0) {
+        throw FileException("FileStream write failed: " + path_);
+    }
+#endif
+}
+
+void FileStream::close() {
+#ifdef _WIN32
+    if (file_handle_ != nullptr && file_handle_ != INVALID_HANDLE_VALUE) {
+        CloseHandle(static_cast<HANDLE>(file_handle_));
+        file_handle_ = nullptr;
+    }
+#else
+    if (fd_ >= 0) {
+        ::close(fd_);
+        fd_ = -1;
+    }
+#endif
+}
+
+bool FileStream::is_open() const {
+#ifdef _WIN32
+    return file_handle_ != nullptr && file_handle_ != INVALID_HANDLE_VALUE;
+#else
+    return fd_ >= 0;
+#endif
+}
+
 } // namespace file
 } // namespace netcopy
-

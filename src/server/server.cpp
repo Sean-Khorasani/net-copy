@@ -17,11 +17,19 @@ ConnectionHandler::ConnectionHandler(network::Socket client_socket,
                                    const config::ServerConfig& config,
                                    std::shared_ptr<crypto::ChaCha20Poly1305> crypto)
     : client_socket_(std::move(client_socket)), config_(config), crypto_(crypto), 
-      negotiated_security_level_(crypto::SecurityLevel::HIGH), sequence_number_(1), handshake_completed_(false) {
+      negotiated_security_level_(crypto::SecurityLevel::HIGH), sequence_number_(1), handshake_completed_(false),
+      current_auto_create_(true), current_truncate_on_zero_(true), current_transfer_completed_(false),
+      negotiated_max_chunk_size_(config.max_chunk_size) {
     client_address_ = get_client_address();
+    
+    // Disable Nagle's algorithm and tune buffer sizes to 4MB for the server's client socket
+    client_socket_.set_tcp_nodelay(true);
+    client_socket_.set_buffer_sizes(4 * 1024 * 1024, 4 * 1024 * 1024);
 }
 
-ConnectionHandler::~ConnectionHandler() = default;
+ConnectionHandler::~ConnectionHandler() {
+    current_file_stream_.close();
+}
 
 void ConnectionHandler::handle() {
     try {
@@ -71,8 +79,11 @@ void ConnectionHandler::perform_handshake() {
     
     LOG_INFO("Handshake from client version: " + request->client_version);
     
-    // Negotiate security level
+    // Negotiate security level and maximum chunk size
     negotiated_security_level_ = request->security_level;
+    negotiated_max_chunk_size_ = request->max_chunk_size == 0
+        ? config_.max_chunk_size
+        : (std::min)(config_.max_chunk_size, static_cast<size_t>(request->max_chunk_size));
     
     // Create appropriate crypto engine
     if (config_.require_auth && !config_.secret_key.empty()) {
@@ -98,6 +109,7 @@ void ConnectionHandler::perform_handshake() {
     response.server_nonce = common::generate_random_bytes(16);
     response.authentication_required = config_.require_auth;
     response.accepted_security_level = negotiated_security_level_;
+    response.max_chunk_size = negotiated_max_chunk_size_;
     
     send_message(response);
     
@@ -113,6 +125,7 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
     LOG_INFO("File request from " + client_address_ + ": " + native_source + " -> " + native_dest);
     
     protocol::FileResponse response;
+    current_transfer_completed_ = false;
     
     try {
         // Validate destination path
@@ -133,6 +146,9 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         current_file_path_ = resolved_path;
         LOG_DEBUG("Setting current file path to: " + current_file_path_);
         
+        current_auto_create_ = request.auto_create_directories;
+        current_truncate_on_zero_ = (request.resume_offset == 0);
+        
         // Check if this is a resume request
         if (request.resume_offset > 0) {
             uint64_t current_size = file::FileManager::get_partial_file_size(resolved_path);
@@ -145,7 +161,7 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         
         // Create directory if needed
         std::string dir = file::FileManager::get_directory(resolved_path);
-        if (!dir.empty() && !file::FileManager::exists(dir)) {
+        if (current_auto_create_ && !dir.empty() && !file::FileManager::exists(dir)) {
             file::FileManager::create_directories(dir);
             LOG_DEBUG("Created directory: " + dir);
         }
@@ -164,55 +180,98 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
 
 void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
     protocol::FileAck ack;
+    bool message_completes_transfer = false;
     
     try {
         if (current_file_path_.empty()) {
             throw std::runtime_error("No file transfer in progress");
         }
         
-        LOG_DEBUG("Writing " + std::to_string(data.data.size()) + " bytes at offset " + 
-                 std::to_string(data.offset) + " to file: " + current_file_path_);
-        
         // Check if this is a directory marker file
         std::string filename = file::FileManager::get_filename(current_file_path_);
         bool is_marker_file = (filename == ".netcopy_dir_marker" || filename == ".netcopy_empty_dir");
-        
-        std::vector<uint8_t> payload = data.data;
-        if (data.compressed) {
-            payload = common::decompress_buffer(data.data, config_.buffer_size);
-        }
 
-        if (is_marker_file) {
-            // This is an empty directory marker - just ensure the directory exists, don't create the file
-            std::string dir = file::FileManager::get_directory(current_file_path_);
-            if (!dir.empty() && !file::FileManager::exists(dir)) {
-                file::FileManager::create_directories(dir);
-                LOG_DEBUG("Created empty directory: " + dir);
+        struct TempChunk {
+            uint64_t offset;
+            uint64_t uncompressed_size;
+            const std::vector<uint8_t>& data;
+            bool is_last_chunk;
+            bool compressed;
+        };
+
+        std::vector<TempChunk> chunks_to_process;
+        if (!data.chunks.empty()) {
+            for (const auto& c : data.chunks) {
+                chunks_to_process.push_back({c.offset, c.uncompressed_size, c.data, c.is_last_chunk, c.compressed});
             }
-            // Don't actually create the marker file - just acknowledge the directory creation
-            LOG_DEBUG("Processed directory marker, directory created but marker file not saved");
         } else {
-            // Actually write the data to the file
-            file::FileManager::write_file_chunk(current_file_path_, data.offset, payload);
+            chunks_to_process.push_back({data.offset, data.uncompressed_size, data.data, data.is_last_chunk, data.compressed});
         }
 
-        ack.bytes_received = data.offset + payload.size();
+        uint64_t max_bytes_received = 0;
+        for (const auto& chunk : chunks_to_process) {
+            LOG_DEBUG("Writing " + std::to_string(chunk.data.size()) + " bytes at offset " + 
+                     std::to_string(chunk.offset) + " to file: " + current_file_path_);
+            
+            std::vector<uint8_t> payload = chunk.data;
+            if (chunk.compressed) {
+                payload = common::decompress_buffer(chunk.data, static_cast<size_t>(chunk.uncompressed_size));
+            }
+
+            if (is_marker_file) {
+                // This is an empty directory marker - just ensure the directory exists, don't create the file
+                if (!current_auto_create_) {
+                    throw FileException("Server policy does not allow empty directory creation");
+                }
+                std::string dir = file::FileManager::get_directory(current_file_path_);
+                if (!dir.empty() && !file::FileManager::exists(dir)) {
+                    file::FileManager::create_directories(dir);
+                    LOG_DEBUG("Created empty directory: " + dir);
+                }
+                LOG_DEBUG("Processed directory marker, directory created but marker file not saved");
+            } else {
+                if (!current_file_stream_.is_open() || current_file_stream_.get_path() != current_file_path_) {
+                    current_file_stream_.close();
+                    if (!current_file_stream_.open_write(current_file_path_, current_truncate_on_zero_, current_auto_create_)) {
+                        throw FileException("Failed to open destination file for writing: " + current_file_path_);
+                    }
+                    current_truncate_on_zero_ = false;
+                }
+                
+                current_file_stream_.write(chunk.offset, payload.data(), payload.size());
+            }
+
+            uint64_t end_offset = chunk.offset + payload.size();
+            if (end_offset > max_bytes_received) {
+                max_bytes_received = end_offset;
+            }
+            if (chunk.is_last_chunk) {
+                message_completes_transfer = true;
+            }
+        }
+
+        ack.bytes_received = max_bytes_received;
         ack.success = true;
-        LOG_DEBUG("Successfully processed " + std::to_string(payload.size()) + " bytes");
+        LOG_DEBUG("Successfully processed chunks, total bytes received: " + std::to_string(max_bytes_received));
 
     } catch (const std::exception& e) {
+        current_file_stream_.close();
         ack.success = false;
         ack.error_message = e.what();
         LOG_ERROR("File data error: " + std::string(e.what()));
     }
     
     send_message(ack);
+    if (ack.success && message_completes_transfer) {
+        current_transfer_completed_ = true;
+        current_file_stream_.close();
+    }
 }
 
 void ConnectionHandler::send_message(const protocol::Message& message) {
     auto data = message.serialize();
     
-    if (crypto_engine_ || crypto_) {
+    if (handshake_completed_ && (crypto_engine_ || crypto_)) {
         data = encrypt_message(data);
     }
     
@@ -378,7 +437,7 @@ void Server::load_config(const std::string& config_file) {
                 
                 auto key_bytes = common::from_hex_string(hex_key);
                 crypto::ChaCha20Poly1305::Key key;
-                std::copy(key_bytes.begin(), key_bytes.begin() + std::min(key_bytes.size(), key.size()), key.begin());
+                std::copy(key_bytes.begin(), key_bytes.begin() + (std::min)(key_bytes.size(), key.size()), key.begin());
                 crypto_ = std::make_shared<crypto::ChaCha20Poly1305>(key);
                 
                 LOG_DEBUG("Crypto initialized with secret key from config");

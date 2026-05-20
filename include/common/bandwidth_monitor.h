@@ -4,6 +4,7 @@
 #include <string>
 #include <deque>
 #include <cstdint>
+#include <mutex>
 
 namespace netcopy {
 namespace common {
@@ -31,6 +32,7 @@ public:
     void reset();
 
 private:
+    mutable std::mutex mutex_;
     struct TransferPoint {
         std::chrono::steady_clock::time_point timestamp;
         uint64_t bytes;

@@ -18,7 +18,10 @@ enum class MessageType : uint32_t {
     FILE_ACK = 6,
     RESUME_REQUEST = 7,
     RESUME_RESPONSE = 8,
-    ERROR_MESSAGE = 9
+    SYNC_REQUEST = 9,
+    SYNC_RESPONSE = 10,
+    CONFLICT_RESOLVED = 11,
+    ERROR_MESSAGE = 12
 };
 
 struct MessageHeader {
@@ -58,6 +61,9 @@ public:
     std::string client_version;
     std::vector<uint8_t> client_nonce;
     crypto::SecurityLevel security_level = crypto::SecurityLevel::HIGH;
+    uint64_t max_chunk_size;  // Maximum chunk size client can handle
+    uint64_t file_size;       // File size for adaptive chunk sizing (0 if not transferring a file)
+    uint32_t requested_parallel_streams;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -71,6 +77,9 @@ public:
     std::vector<uint8_t> server_nonce;
     bool authentication_required;
     crypto::SecurityLevel accepted_security_level = crypto::SecurityLevel::HIGH;
+    uint64_t max_chunk_size;  // Maximum chunk size server can handle
+    uint32_t accepted_parallel_streams;
+    bool auto_create_directories_allowed;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -84,6 +93,8 @@ public:
     std::string destination_path;
     bool recursive;
     uint64_t resume_offset;
+    bool auto_create_directories = true;
+    bool truncate_destination = false;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -105,8 +116,26 @@ public:
 class FileData : public Message {
 public:
     FileData();
-
+    
+    // For batched transfers - multiple chunks in a single message
+    struct Chunk {
+        uint64_t offset;
+        uint64_t uncompressed_size;
+        std::vector<uint8_t> data;
+        bool is_last_chunk;
+        bool compressed;
+        
+        // Serialization helper for individual chunk
+        std::vector<uint8_t> serialize_payload() const;
+        void deserialize_payload(const std::vector<uint8_t>& data);
+    };
+    
+    // Batched transfer - multiple chunks in one message
+    std::vector<Chunk> chunks;
+    
+    // Single chunk (for backward compatibility)
     uint64_t offset;
+    uint64_t uncompressed_size;
     std::vector<uint8_t> data;
     bool is_last_chunk;
     bool compressed;
@@ -122,6 +151,44 @@ public:
     uint64_t bytes_received;
     bool success;
     std::string error_message;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class SyncRequest : public Message {
+public:
+    SyncRequest();
+    
+    std::string local_path;
+    std::string remote_path;
+    bool recursive;
+    uint32_t sync_interval_seconds;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class SyncResponse : public Message {
+public:
+    SyncResponse();
+    
+    bool success;
+    std::string error_message;
+    uint64_t sync_id;
+    uint32_t file_count;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class ConflictResolved : public Message {
+public:
+    ConflictResolved();
+    
+    std::string file_path;
+    std::string resolution_strategy;
+    bool resolved_successfully;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;

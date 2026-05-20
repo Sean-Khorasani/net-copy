@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <array>
 #include <vector>
+#include <string>
 #include <memory>
 
 namespace netcopy {

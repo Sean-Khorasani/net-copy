@@ -163,10 +163,10 @@ std::vector<uint8_t> generate_random_bytes(size_t length) {
     std::vector<uint8_t> bytes(length);
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_int_distribution<uint8_t> dis(0, 255);
+    std::uniform_int_distribution<uint16_t> dis(0, 255);
     
     for (auto& byte : bytes) {
-        byte = dis(gen);
+        byte = static_cast<uint8_t>(dis(gen));
     }
     
     return bytes;

@@ -11,6 +11,7 @@ BandwidthMonitor::BandwidthMonitor() : total_bytes_(0) {
 }
 
 void BandwidthMonitor::record_bytes(uint64_t bytes) {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto now = std::chrono::steady_clock::now();
     
     transfer_history_.push_back({now, bytes});
@@ -21,6 +22,7 @@ void BandwidthMonitor::record_bytes(uint64_t bytes) {
 }
 
 double BandwidthMonitor::get_current_rate() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (transfer_history_.size() < 2) {
         return 0.0;
     }
@@ -63,16 +65,19 @@ std::string BandwidthMonitor::get_rate_string() const {
 }
 
 uint64_t BandwidthMonitor::get_total_bytes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     return total_bytes_;
 }
 
 double BandwidthMonitor::get_duration() const {
+    std::lock_guard<std::mutex> lock(mutex_);
     auto now = std::chrono::steady_clock::now();
     auto duration = now - start_time_;
     return std::chrono::duration<double>(duration).count();
 }
 
 void BandwidthMonitor::reset() {
+    std::lock_guard<std::mutex> lock(mutex_);
     transfer_history_.clear();
     total_bytes_ = 0;
     start_time_ = std::chrono::steady_clock::now();
@@ -80,7 +85,7 @@ void BandwidthMonitor::reset() {
 
 void BandwidthMonitor::cleanup_old_entries() {
     auto now = std::chrono::steady_clock::now();
-    auto cutoff_time = now - std::chrono::seconds(5); // Keep 5 seconds of history
+    auto cutoff_time = now - std::chrono::seconds(10); // Keep 10 seconds of history
     
     // Remove entries older than cutoff
     transfer_history_.erase(

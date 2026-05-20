@@ -3,6 +3,7 @@
 #include "crypto/chacha20_poly1305.h"
 #include <array>
 #include <vector>
+#include <string>
 #include <cstdint>
 
 namespace netcopy {

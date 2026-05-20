@@ -55,10 +55,10 @@ XorCipher::Key XorCipher::generate_key() {
     // Use high-resolution clock for better randomness
     auto seed = std::chrono::high_resolution_clock::now().time_since_epoch().count();
     std::mt19937_64 gen(seed);
-    std::uniform_int_distribution<uint8_t> dist(0, 255);
+    std::uniform_int_distribution<uint16_t> dist(0, 255);
     
     for (auto& byte : key) {
-        byte = dist(gen);
+        byte = static_cast<uint8_t>(dist(gen));
     }
     
     return key;

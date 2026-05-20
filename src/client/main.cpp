@@ -11,6 +11,28 @@
 #include <iomanip>
 #include <vector>
 #include <stdexcept>
+#include <sstream>
+#include <atomic>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+namespace {
+#ifdef _WIN32
+netcopy::client::Client* g_active_client = nullptr;
+
+BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
+    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT) {
+        if (g_active_client != nullptr) {
+            g_active_client->request_cancel();
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+#endif
+}
 
 struct CommandLineArgs {
     std::string config_file;
@@ -23,6 +45,8 @@ struct CommandLineArgs {
     uint16_t server_port = 0; // Added for client port
     bool empty_dirs_specified = false; // Track if user specified --no-empty-dirs
     bool create_empty_directories = true; // Default value
+    bool auto_create_directories = true;
+    bool auto_create_specified = false;
     netcopy::crypto::SecurityLevel security_level = netcopy::crypto::SecurityLevel::HIGH;
 };
 
@@ -39,6 +63,8 @@ void print_usage(const char* program_name) {
     std::cout << "  -p, --port PORT            Specify server port number" << std::endl;
     std::cout << "  -R, --recursive            Transfer directories recursively" << std::endl;
     std::cout << "  --resume                   Resume interrupted transfer" << std::endl;
+    std::cout << "  --auto-create              Automatically create non-existent directories (default)" << std::endl;
+    std::cout << "  --no-auto-create           Disable automatic directory creation" << std::endl;
     std::cout << "  --no-empty-dirs            Don't create empty directories" << std::endl;
     std::cout << "  -s, --security LEVEL       Security level: high (default), fast, aes, or AES-256-GCM" << std::endl;
     std::cout << "  -v, --verbose              Enable verbose logging" << std::endl;
@@ -94,6 +120,12 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
             args.recursive = true;
         } else if (arg == "--resume") {
             args.resume = true;
+        } else if (arg == "--auto-create") {
+            args.auto_create_directories = true;
+            args.auto_create_specified = true;
+        } else if (arg == "--no-auto-create") {
+            args.auto_create_directories = false;
+            args.auto_create_specified = true;
         } else if (arg == "--no-empty-dirs") {
             args.empty_dirs_specified = true;
             args.create_empty_directories = false;
@@ -193,6 +225,14 @@ int main(int argc, char* argv[]) {
             if (args.verbose) {
                 std::cout << "Config setting: create_empty_directories = " << 
                             (config.create_empty_directories ? "true" : "false") << std::endl;
+            }
+        }
+
+        if (args.auto_create_specified) {
+            config.auto_create_directories = args.auto_create_directories;
+            if (args.verbose) {
+                std::cout << "Command line override: auto_create_directories = " << 
+                            (config.auto_create_directories ? "true" : "false") << std::endl;
             }
         }
         
@@ -371,20 +411,31 @@ int main(int argc, char* argv[]) {
             std::cout << "Connected successfully" << std::endl;
         }
 
+#ifdef _WIN32
+        g_active_client = &client;
+        SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+#endif
+
         // Create bandwidth monitor
         auto bandwidth_monitor = std::make_shared<netcopy::common::BandwidthMonitor>();
         uint64_t last_bytes = 0;
+        size_t last_line_length = 0;
         
-        client.set_progress_callback(static_cast<netcopy::client::Client::ProgressCallback>([bandwidth_monitor, &last_bytes](uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file) {
+        client.set_progress_callback(static_cast<netcopy::client::Client::ProgressCallback>([bandwidth_monitor, &last_bytes, &last_line_length](uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file) {
             if (total_bytes > 0) {
-                // Record new bytes for bandwidth calculation
-                uint64_t new_bytes = bytes_transferred - last_bytes;
+                // Record only monotonic progress so parallel callbacks cannot
+                // move the cursor backward or corrupt the rate monitor.
+                uint64_t monotonic_bytes = bytes_transferred;
+                if (monotonic_bytes < last_bytes) {
+                    monotonic_bytes = last_bytes;
+                }
+                uint64_t new_bytes = monotonic_bytes - last_bytes;
                 if (new_bytes > 0) {
                     bandwidth_monitor->record_bytes(new_bytes);
-                    last_bytes = bytes_transferred;
                 }
+                last_bytes = monotonic_bytes;
                 
-                double progress = static_cast<double>(bytes_transferred) / total_bytes * 100.0;
+                double progress = static_cast<double>(monotonic_bytes) / total_bytes * 100.0;
                 std::string filename = netcopy::file::FileManager::get_filename(current_file);
                 
                 // Format file size in human readable format
@@ -407,10 +458,18 @@ int main(int argc, char* argv[]) {
                 
                 // Get current transfer rate
                 std::string rate_str = bandwidth_monitor->get_rate_string();
+                std::ostringstream line;
+                line << filename << ": " << std::fixed << std::setprecision(1) << progress << "% "
+                     << "(" << format_size(monotonic_bytes) << "/" << format_size(total_bytes) << ") "
+                     << "at " << rate_str;
+
+                std::string output = line.str();
+                if (output.size() < last_line_length) {
+                    output.append(last_line_length - output.size(), ' ');
+                }
+                last_line_length = output.size();
                 
-                std::cout << "\r" << filename << ": " << std::fixed << std::setprecision(1) << progress << "% "
-                          << "(" << format_size(bytes_transferred) << "/" << format_size(total_bytes) << ") "
-                          << "at " << rate_str << std::flush;
+                std::cout << "\r" << output << std::flush;
             }
         }));
 
@@ -428,13 +487,20 @@ int main(int argc, char* argv[]) {
             client.transfer_file(args.source_path, remote_path, args.resume);
             std::cout << std::endl << "File transfer completed: " << filename << std::endl;
         }
+
+#ifdef _WIN32
+        SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
+        g_active_client = nullptr;
+#endif
         
     } catch (const std::exception& e) {
+#ifdef _WIN32
+        SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
+        g_active_client = nullptr;
+#endif
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
     }
     
     return 0;
 }
-
-
