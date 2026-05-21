@@ -82,6 +82,10 @@ struct ServerConfig {
     std::vector<std::string> allowed_paths;
     bool auto_create_directories;
     
+    // User auth settings
+    std::string users_file;       // path to users.csv (default: "users.csv")
+    bool allow_anonymous;         // allow connections with no username (default: false)
+    
     static ServerConfig load_from_file(const std::string& filename);
     static ServerConfig get_default();
 };
@@ -113,6 +117,13 @@ struct ClientConfig {
     // Transfer settings
     bool create_empty_directories;
     bool auto_create_directories;
+    
+    // Auth settings
+    std::string username;
+    std::string password;
+    std::string auth_method;            // "none", "password", "mlkem"
+    std::string private_key_file;       // path to .pem ML-KEM private key
+    std::string private_key_passphrase; // passphrase to decrypt key file
     
     static ClientConfig load_from_file(const std::string& filename);
     static ClientConfig get_default();

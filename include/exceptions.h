@@ -50,5 +50,12 @@ public:
         : NetCopyException("Protocol error: " + message) {}
 };
 
+// Authentication-related exceptions
+class AuthException : public NetCopyException {
+public:
+    explicit AuthException(const std::string& message)
+        : NetCopyException("Auth error: " + message) {}
+};
+
 } // namespace netcopy
 

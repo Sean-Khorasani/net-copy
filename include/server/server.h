@@ -6,6 +6,7 @@
 #include "config/config_parser.h"
 #include "protocol/message.h"
 #include "file/file_manager.h"
+#include "auth/user_db.h"
 #include <memory>
 #include <string>
 #include <thread>
@@ -39,6 +40,9 @@ private:
     bool current_transfer_completed_;
     size_t negotiated_max_chunk_size_;
     file::FileStream current_file_stream_;
+    // Auth state
+    auth::UserDb user_db_;
+    std::string authenticated_user_;
     
     // Protocol handling
     void perform_handshake();

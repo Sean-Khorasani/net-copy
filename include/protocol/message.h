@@ -21,7 +21,10 @@ enum class MessageType : uint32_t {
     SYNC_REQUEST = 9,
     SYNC_RESPONSE = 10,
     CONFLICT_RESOLVED = 11,
-    ERROR_MESSAGE = 12
+    ERROR_MESSAGE = 12,
+    AUTH_CHALLENGE = 13,
+    AUTH_RESPONSE = 14,
+    AUTH_RESULT = 15
 };
 
 struct MessageHeader {
@@ -64,6 +67,9 @@ public:
     uint64_t max_chunk_size;  // Maximum chunk size client can handle
     uint64_t file_size;       // File size for adaptive chunk sizing (0 if not transferring a file)
     uint32_t requested_parallel_streams;
+    // Auth fields (appended last for backward compatibility)
+    std::string username;       // empty = anonymous
+    uint8_t auth_method_id;     // 0=none, 1=password, 2=mlkem
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -201,6 +207,40 @@ public:
     uint32_t error_code;
     std::string error_description;
     
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class AuthChallenge : public Message {
+public:
+    AuthChallenge();
+    uint8_t method;                         // 1=password, 2=mlkem
+    std::vector<uint8_t> challenge_nonce;   // 32 bytes
+    std::string salt_hex;                   // for password auth
+    int pbkdf2_iterations;                  // for password auth
+    std::vector<uint8_t> kem_ciphertext;    // for ML-KEM auth
+    std::string mlkem_level_str;            // "ML-KEM-768" etc, for ML-KEM auth
+    std::vector<uint8_t> kem_nonce;         // 32 bytes, for ML-KEM auth
+private:
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class AuthResponse : public Message {
+public:
+    AuthResponse();
+    std::vector<uint8_t> proof;  // 32-byte SHA3-256 proof
+private:
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class AuthResult : public Message {
+public:
+    AuthResult();
+    bool success;
+    std::string error_message;
+private:
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
 };
