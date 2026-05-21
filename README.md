@@ -6,7 +6,7 @@
 
 ## Table of Contents
 
-- [Quick Start (copy-paste this)](#quick-start)
+- [Quick Start](#quick-start)
 - [Building](#building)
 - [Architecture Overview](#architecture-overview)
 - [Server](#server)
