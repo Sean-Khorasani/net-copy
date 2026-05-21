@@ -5,6 +5,9 @@
 #include "common/compression.h"
 #include "daemon/daemon.h"
 #include "exceptions.h"
+#include "auth/user_db.h"
+#include "auth/auth_engine.h"
+#include "crypto/sha3.h"
 #include <algorithm>
 #include <vector> // Added for std::vector
 #include <iostream> // Added for debug output
@@ -21,6 +24,13 @@ ConnectionHandler::ConnectionHandler(network::Socket client_socket,
       current_auto_create_(true), current_truncate_on_zero_(true), current_transfer_completed_(false),
       negotiated_max_chunk_size_(config.max_chunk_size) {
     client_address_ = get_client_address();
+    
+    // Load user database
+    user_db_ = auth::UserDb::load(config_.users_file);
+    if (user_db_.is_loaded()) {
+        LOG_INFO("User database loaded from: " + config_.users_file + 
+                 " (" + std::to_string(user_db_.users().size()) + " users)");
+    }
     
     // Disable Nagle's algorithm and tune buffer sizes to 4MB for the server's client socket
     client_socket_.set_tcp_nodelay(true);
@@ -113,6 +123,68 @@ void ConnectionHandler::perform_handshake() {
     
     send_message(response);
     
+    // Auth phase
+    bool auth_needed = false;
+    if (user_db_.is_loaded()) {
+        if (!request->username.empty()) {
+            auth_needed = true;
+        } else if (!config_.allow_anonymous) {
+            throw AuthException("Anonymous access not allowed");
+        }
+    } else if (!config_.allow_anonymous && !config_.users_file.empty()) {
+        // users_file configured but not found - allow only if allow_anonymous is true
+        if (!config_.allow_anonymous) {
+            LOG_WARNING("User database not found at '" + config_.users_file + "' - allowing anonymous (no auth)");
+        }
+    }
+
+    if (auth_needed) {
+        auth::AuthMethod method = static_cast<auth::AuthMethod>(request->auth_method_id);
+        if (method == auth::AuthMethod::NONE) {
+            if (!config_.allow_anonymous) {
+                throw AuthException("Authentication required");
+            }
+        } else {
+            auth::AuthEngine engine(user_db_);
+            auto challenge = engine.prepare_challenge(request->username, method);
+
+            // Build and send AuthChallenge message
+            protocol::AuthChallenge auth_challenge_msg;
+            auth_challenge_msg.method           = static_cast<uint8_t>(method);
+            auth_challenge_msg.challenge_nonce  = challenge.challenge_nonce;
+            auth_challenge_msg.salt_hex         = challenge.salt_hex;
+            auth_challenge_msg.pbkdf2_iterations= challenge.pbkdf2_iterations;
+            auth_challenge_msg.kem_ciphertext   = challenge.kem_ciphertext;
+            auth_challenge_msg.mlkem_level_str  = crypto::MlKem::level_to_string(challenge.mlkem_level);
+            auth_challenge_msg.kem_nonce        = challenge.kem_nonce;
+            send_message(auth_challenge_msg);
+
+            // Receive AuthResponse
+            auto resp_msg = receive_message();
+            auto auth_resp = dynamic_cast<protocol::AuthResponse*>(resp_msg.get());
+            if (!auth_resp) {
+                protocol::AuthResult fail;
+                fail.success = false;
+                fail.error_message = "Expected AuthResponse";
+                send_message(fail);
+                throw AuthException("Protocol error during authentication");
+            }
+
+            bool ok = engine.verify_response(challenge, auth_resp->proof);
+            protocol::AuthResult result;
+            result.success = ok;
+            result.error_message = ok ? "" : "Invalid credentials";
+            send_message(result);
+
+            if (!ok) {
+                throw AuthException("Authentication failed for user: " + request->username);
+            }
+
+            authenticated_user_ = request->username;
+            LOG_INFO("User '" + request->username + "' authenticated successfully");
+        }
+    }
+
     handshake_completed_ = true;
     LOG_INFO("Handshake completed with " + client_address_);
 }
@@ -131,6 +203,14 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         // Validate destination path
         if (!is_path_allowed(request.destination_path)) {
             throw FileException("Access denied to path: " + request.destination_path);
+        }
+        
+        // If a user is authenticated, also check their personal allowed_paths
+        if (!authenticated_user_.empty() && user_db_.is_loaded()) {
+            const auto* user = user_db_.find_user(authenticated_user_);
+            if (user && !user->can_access_path(request.destination_path)) {
+                throw FileException("User '" + authenticated_user_ + "' does not have access to: " + request.destination_path);
+            }
         }
         
         std::string resolved_path = resolve_path(request.destination_path);

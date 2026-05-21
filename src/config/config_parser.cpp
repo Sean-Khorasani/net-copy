@@ -248,6 +248,10 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
     }
     config.auto_create_directories = parser.get_bool("paths", "auto_create_directories", true);
     
+    // Auth settings
+    config.users_file      = parser.get_string("auth", "users_file", "users.csv");
+    config.allow_anonymous = parser.get_bool("auth", "allow_anonymous", false);
+    
     return config;
 }
 
@@ -274,6 +278,10 @@ ServerConfig ServerConfig::get_default() {
     
     config.allowed_paths = {"/var/lib/net_copy"};
     config.auto_create_directories = true;
+    
+    // Auth settings defaults
+    config.users_file      = "users.csv";
+    config.allow_anonymous = false;
     
     return config;
 }
@@ -306,6 +314,13 @@ ClientConfig ClientConfig::load_from_file(const std::string& filename) {
     config.create_empty_directories = parser.get_bool("transfer", "create_empty_directories", true);
     config.auto_create_directories = parser.get_bool("transfer", "auto_create_directories", true);
     
+    // Auth settings
+    config.username               = parser.get_string("auth", "username", "");
+    config.password               = parser.get_string("auth", "password", "");
+    config.auth_method            = parser.get_string("auth", "auth_method", "none");
+    config.private_key_file       = parser.get_string("auth", "private_key_file", "");
+    config.private_key_passphrase = parser.get_string("auth", "private_key_passphrase", "");
+    
     return config;
 }
 
@@ -332,6 +347,13 @@ ClientConfig ClientConfig::get_default() {
     // Transfer settings defaults
     config.create_empty_directories = true;  // Default to true
     config.auto_create_directories = true;
+    
+    // Auth settings defaults
+    config.username               = "";
+    config.password               = "";
+    config.auth_method            = "none";
+    config.private_key_file       = "";
+    config.private_key_passphrase = "";
     
     return config;
 }

@@ -156,6 +156,15 @@ std::unique_ptr<Message> Message::deserialize(const std::vector<uint8_t>& data) 
         case MessageType::ERROR_MESSAGE:
             message = std::make_unique<ErrorMessage>();
             break;
+        case MessageType::AUTH_CHALLENGE:
+            message = std::make_unique<AuthChallenge>();
+            break;
+        case MessageType::AUTH_RESPONSE:
+            message = std::make_unique<AuthResponse>();
+            break;
+        case MessageType::AUTH_RESULT:
+            message = std::make_unique<AuthResult>();
+            break;
         default:
             throw ProtocolException("Unknown message type");
     }
@@ -171,7 +180,9 @@ HandshakeRequest::HandshakeRequest()
     : Message(MessageType::HANDSHAKE_REQUEST),
       max_chunk_size(0),
       file_size(0),
-      requested_parallel_streams(1) {}
+      requested_parallel_streams(1),
+      username(""),
+      auth_method_id(0) {}
 
 std::vector<uint8_t> HandshakeRequest::serialize_payload() const {
     std::vector<uint8_t> buffer;
@@ -181,6 +192,9 @@ std::vector<uint8_t> HandshakeRequest::serialize_payload() const {
     write_uint64(buffer, max_chunk_size);
     write_uint64(buffer, file_size);
     write_uint32(buffer, requested_parallel_streams);
+    // Auth fields (appended last for backward compatibility)
+    write_string(buffer, username);
+    buffer.push_back(auth_method_id);
     return buffer;
 }
 
@@ -203,6 +217,18 @@ void HandshakeRequest::deserialize_payload(const std::vector<uint8_t>& data) {
         requested_parallel_streams = read_uint32(data, offset);
     } else {
         requested_parallel_streams = 1;
+    }
+    // Auth fields (backward-compat guards)
+    if (offset < data.size()) {
+        // We need at least 4 bytes for the string length prefix
+        if (offset + 4 <= data.size()) {
+            username = read_string(data, offset);
+        }
+    }
+    if (offset < data.size()) {
+        auth_method_id = data[offset++];
+    } else {
+        auth_method_id = 0;
     }
 }
 
@@ -447,6 +473,72 @@ void ErrorMessage::deserialize_payload(const std::vector<uint8_t>& data) {
     size_t offset = 0;
     error_code = read_uint32(data, offset);
     error_description = read_string(data, offset);
+}
+
+// AuthChallenge implementation
+AuthChallenge::AuthChallenge()
+    : Message(MessageType::AUTH_CHALLENGE),
+      method(0),
+      pbkdf2_iterations(0) {}
+
+std::vector<uint8_t> AuthChallenge::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    buffer.push_back(method);
+    write_bytes(buffer, challenge_nonce);
+    write_string(buffer, salt_hex);
+    write_uint32(buffer, static_cast<uint32_t>(pbkdf2_iterations));
+    write_bytes(buffer, kem_ciphertext);
+    write_string(buffer, mlkem_level_str);
+    write_bytes(buffer, kem_nonce);
+    return buffer;
+}
+
+void AuthChallenge::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    if (offset >= data.size()) throw ProtocolException("AuthChallenge: missing method byte");
+    method = data[offset++];
+    challenge_nonce   = read_bytes(data, offset);
+    salt_hex          = read_string(data, offset);
+    pbkdf2_iterations = static_cast<int>(read_uint32(data, offset));
+    kem_ciphertext    = read_bytes(data, offset);
+    mlkem_level_str   = read_string(data, offset);
+    kem_nonce         = read_bytes(data, offset);
+}
+
+// AuthResponse implementation
+AuthResponse::AuthResponse()
+    : Message(MessageType::AUTH_RESPONSE) {}
+
+std::vector<uint8_t> AuthResponse::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    write_bytes(buffer, proof);
+    return buffer;
+}
+
+void AuthResponse::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    proof = read_bytes(data, offset);
+}
+
+// AuthResult implementation
+AuthResult::AuthResult()
+    : Message(MessageType::AUTH_RESULT),
+      success(false) {}
+
+std::vector<uint8_t> AuthResult::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    buffer.push_back(success ? 1 : 0);
+    write_string(buffer, error_message);
+    return buffer;
+}
+
+void AuthResult::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    if (offset >= data.size()) throw ProtocolException("AuthResult: missing success byte");
+    success = data[offset++] != 0;
+    if (offset < data.size()) {
+        error_message = read_string(data, offset);
+    }
 }
 
 } // namespace protocol

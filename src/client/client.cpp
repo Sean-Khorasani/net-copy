@@ -4,6 +4,10 @@
 #include "exceptions.h"
 #include "file/file_manager.h"
 #include "logging/logger.h"
+#include "crypto/sha3.h"
+#include "crypto/mlkem.h"
+#include "crypto/key_manager.h"
+#include "protocol/message.h"
 #include <algorithm>
 #include <exception>
 #include <mutex>
@@ -185,6 +189,11 @@ void Client::perform_handshake() {
     request.max_chunk_size = chunk_size_manager_.get_max_chunk_size();
     request.file_size = 0;
     request.requested_parallel_streams = requested_parallel_streams_;
+    // Set auth fields
+    request.username = config_.username;
+    if (config_.auth_method == "password")      request.auth_method_id = 1;
+    else if (config_.auth_method == "mlkem")    request.auth_method_id = 2;
+    else                                         request.auth_method_id = 0;
 
     send_message(request);
 
@@ -206,6 +215,59 @@ void Client::perform_handshake() {
             throw CryptoException("Server requires authentication but no secret key is configured");
         }
         crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, config_.secret_key);
+    }
+
+    // User authentication phase
+    if (!config_.username.empty() && config_.auth_method != "none" && request.auth_method_id != 0) {
+        auto challenge_msg = receive_message();
+        auto* auth_challenge = dynamic_cast<protocol::AuthChallenge*>(challenge_msg.get());
+        if (!auth_challenge) {
+            throw ProtocolException("Expected AuthChallenge from server");
+        }
+
+        std::vector<uint8_t> proof;
+
+        if (auth_challenge->method == 1) { // PASSWORD
+            // Derive key from password
+            auto salt = crypto::hex_to_bytes(auth_challenge->salt_hex);
+            auto dk = crypto::pbkdf2_sha3_256(config_.password, salt,
+                                               auth_challenge->pbkdf2_iterations, 32);
+            // proof = SHA3-256(dk || challenge_nonce)
+            std::vector<uint8_t> preimage = dk;
+            preimage.insert(preimage.end(),
+                            auth_challenge->challenge_nonce.begin(),
+                            auth_challenge->challenge_nonce.end());
+            proof = crypto::sha3_256(preimage);
+
+        } else if (auth_challenge->method == 2) { // ML-KEM
+            if (config_.private_key_file.empty()) {
+                throw CryptoException("ML-KEM private key file not configured");
+            }
+            crypto::MlKemLevel level;
+            auto privkey = crypto::load_private_key(config_.private_key_file, level,
+                                                     config_.private_key_passphrase);
+            auto shared_secret = crypto::MlKem::decapsulate(privkey,
+                                                             auth_challenge->kem_ciphertext,
+                                                             level);
+            // proof = SHA3-256(shared_secret || kem_nonce)
+            std::vector<uint8_t> preimage = shared_secret;
+            preimage.insert(preimage.end(),
+                            auth_challenge->kem_nonce.begin(),
+                            auth_challenge->kem_nonce.end());
+            proof = crypto::sha3_256(preimage);
+        }
+
+        protocol::AuthResponse auth_resp;
+        auth_resp.proof = proof;
+        send_message(auth_resp);
+
+        auto result_msg = receive_message();
+        auto* auth_result = dynamic_cast<protocol::AuthResult*>(result_msg.get());
+        if (!auth_result || !auth_result->success) {
+            std::string err = auth_result ? auth_result->error_message : "No auth result";
+            throw AuthException("Authentication failed: " + err);
+        }
+        LOG_INFO("Authenticated as '" + config_.username + "'");
     }
 }
 
