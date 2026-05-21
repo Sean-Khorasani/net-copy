@@ -102,6 +102,9 @@ set(COMMON_SOURCES
     src/crypto/xor_cipher.cpp
     src/crypto/aes_ctr.cpp
     src/crypto/crypto_engine.cpp
+    src/crypto/sha3.cpp
+    src/crypto/mlkem.cpp
+    src/crypto/key_manager.cpp
     src/network/socket.cpp
     src/protocol/message.cpp
     src/file/file_manager.cpp
@@ -112,6 +115,8 @@ set(COMMON_SOURCES
     src/common/bandwidth_limiter.cpp
     src/common/chunk_size_manager.cpp
     src/common/compression.cpp
+    src/auth/user_db.cpp
+    src/auth/auth_engine.cpp
 )
 
 # Add GPU source if CUDA is available, otherwise use CPU fallback
@@ -144,6 +149,17 @@ else()
     endif()
 endif()
 
+# Find liboqs for ML-KEM (post-quantum cryptography)
+find_package(liboqs REQUIRED)
+#target_link_libraries(net_copy_common PUBLIC liboqs::oqs)
+target_link_libraries(net_copy_common PUBLIC OQS::oqs)
+message(STATUS "liboqs found - ML-KEM authentication will be enabled")
+
+# Windows: link bcrypt for BCryptGenRandom used in sha3.cpp
+if(WIN32)
+    target_link_libraries(net_copy_common PUBLIC bcrypt)
+endif()
+
 # Set specific compilation flags for AES-CTR file to enable hardware acceleration
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set_source_files_properties(src/crypto/aes_ctr.cpp PROPERTIES
@@ -163,15 +179,20 @@ add_executable(net_copy_client
     src/client/client.cpp
 )
 
-# Keygen executable
-add_executable(net_copy_keygen
-    src/keygen/main.cpp
+# Keygen executable replaced by Admin tool
+add_executable(net_copy_admin
+    src/admin/main.cpp
 )
 
 # Link common library to all executables
 target_link_libraries(net_copy_server PRIVATE net_copy_common)
 target_link_libraries(net_copy_client PRIVATE net_copy_common)
-target_link_libraries(net_copy_keygen PRIVATE net_copy_common)
+target_link_libraries(net_copy_admin PRIVATE net_copy_common)
+
+# Windows: link ws2_32 for admin tool
+if(WIN32)
+    target_link_libraries(net_copy_admin PRIVATE ws2_32)
+endif()
 
 # Link CUDA libraries if available
 if(CUDA_ENABLED)
@@ -179,12 +200,12 @@ if(CUDA_ENABLED)
         # Modern CMake CUDA linking
         target_link_libraries(net_copy_server PRIVATE CUDA::cudart CUDA::cuda_driver)
         target_link_libraries(net_copy_client PRIVATE CUDA::cudart CUDA::cuda_driver)
-        target_link_libraries(net_copy_keygen PRIVATE CUDA::cudart CUDA::cuda_driver)
+        target_link_libraries(net_copy_admin PRIVATE CUDA::cudart CUDA::cuda_driver)
     else()
         # Legacy CUDA linking
         target_link_libraries(net_copy_server PRIVATE ${CUDA_LIBRARIES})
         target_link_libraries(net_copy_client PRIVATE ${CUDA_LIBRARIES})
-        target_link_libraries(net_copy_keygen PRIVATE ${CUDA_LIBRARIES})
+        target_link_libraries(net_copy_admin PRIVATE ${CUDA_LIBRARIES})
     endif()
     
     # Set CUDA properties for the common library
@@ -196,7 +217,6 @@ if(WIN32)
     # Link Winsock and other Windows libraries
     target_link_libraries(net_copy_server PRIVATE ws2_32)
     target_link_libraries(net_copy_client PRIVATE ws2_32)
-    target_link_libraries(net_copy_keygen PRIVATE ws2_32)
     
     # Windows Service executable
     add_executable(net_copy_service
@@ -220,7 +240,7 @@ if(WIN32)
 endif()
 
 # Add install targets
-install(TARGETS net_copy_server net_copy_client net_copy_keygen
+install(TARGETS net_copy_server net_copy_client net_copy_admin
     DESTINATION bin
 )
 
