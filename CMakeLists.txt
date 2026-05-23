@@ -110,6 +110,7 @@ set(COMMON_SOURCES
     src/file/file_manager.cpp
     src/config/config_parser.cpp
     src/logging/logger.cpp
+    src/logging/audit_log.cpp
     src/common/utils.cpp
     src/common/bandwidth_monitor.cpp
     src/common/bandwidth_limiter.cpp
@@ -182,6 +183,7 @@ add_executable(net_copy_client
 # Keygen executable replaced by Admin tool
 add_executable(net_copy_admin
     src/admin/main.cpp
+    src/client/client.cpp
 )
 
 # Link common library to all executables
