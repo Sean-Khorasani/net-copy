@@ -190,12 +190,18 @@ max_bandwidth_percent = 100
 # Clients use smaller chunks unless they grow via AIMD.
 # 910485760 = 868 MB (effectively unlimited — client caps at 32 MB anyway)
 max_chunk_size = 910485760
+# TCP socket buffer sizes in bytes (0 = OS default auto-tuning)
+socket_buffer_size = 0
 
 [logging]
 # Log verbosity: DEBUG, INFO, WARNING, ERROR
 log_level = INFO
 # Path to log file. Leave empty to disable file logging.
 log_file = server.log
+# Log format: "text" (default) or "json" for structured log pipelines
+log_format = text
+# Path to append-only transfer audit log. Leave empty to disable.
+audit_log = audit.log
 # Print log lines to stdout (useful when not running as daemon).
 console_output = true
 
@@ -262,17 +268,20 @@ net_copy_client [options] <source> <destination>
 Options:
   -c, --config FILE          Path to configuration file
   -p, --port PORT            Override server port
-  -R, --recursive            Transfer a directory and all its contents
+  -R, --recursive            Transfer a directory and all its contents recursively
   --resume                   Resume an interrupted transfer (skip already-received bytes)
   --auto-create              Create missing destination directories (default)
   --no-auto-create           Fail if destination directory doesn't exist
   --no-empty-dirs            Skip empty subdirectories during recursive transfer
   -s, --security LEVEL       Encryption: high (default) | fast | aes | AES-256-GCM
+  -g, --get, --download      Download/pull file/directory from the server (source becomes remote, destination becomes local)
   -v, --verbose              Show debug info and live connection details
   -h, --help                 Show help
 ```
 
-### Destination Format
+### Destination/Source Format
+
+For uploading, the `<destination>` is remote. For downloading (using `--get`), the `<source>` is remote. The remote path format is:
 
 ```
 <server>:<port>/<remote-path>   →   127.0.0.1:1245/D:/Work/
@@ -298,6 +307,8 @@ max_bandwidth_percent = 100
 # Retry on transient errors.
 retry_attempts = 3
 retry_delay = 5            # seconds between retries
+# TCP socket buffer sizes in bytes (0 = OS default auto-tuning)
+socket_buffer_size = 0
 
 # Chunk size tuning (AIMD — adapts automatically during transfer)
 initial_chunk_size = 262144    # 256 KB starting chunk size
@@ -309,6 +320,8 @@ chunk_size_decrease_factor = 0.5   # halve chunk size after an error
 [logging]
 log_level = DEBUG     # DEBUG | INFO | WARNING | ERROR
 log_file = client.log
+# Log format: "text" (default) or "json" for structured log pipelines
+log_format = text
 console_output = true
 
 [connection]
@@ -326,8 +339,9 @@ create_empty_directories = true
 # username = alice
 # auth_method = password          # password | mlkem | none
 # password = MySecret123          # for auth_method = password
+# password_encrypted =            # AES-CTR + HMAC-SHA3-256 encrypted password blob
 # private_key_file = id_mlkem768.pem   # for auth_method = mlkem
-# private_key_passphrase =        # leave empty if key file is not encrypted
+# private_key_passphrase =        # leave empty if key file is not encrypted (or if decrypting password_encrypted with interactive prompt)
 ```
 
 ---
@@ -494,6 +508,39 @@ Decrypts an encrypted private key back to plain format. If `--out` is omitted th
 
 ---
 
+#### `encrypt-password` — Encrypt a password for client.conf
+
+```
+net_copy_admin encrypt-password [--passphrase PASS] [--pass PASSWORD]
+```
+
+Encrypts a password using AES-CTR + HMAC-SHA3-256 derived from a master passphrase. The output is a base64-encoded blob that can be saved in `client.conf` as `password_encrypted`.
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--passphrase` | No | Master passphrase to derive the key (prompted interactively if omitted) |
+| `--pass` | No | Cleartext password to encrypt (prompted interactively if omitted) |
+
+```powershell
+# Interactive encryption (recommended — keeps password out of command history)
+.\net_copy_admin.exe encrypt-password
+
+# Scripted encryption
+.\net_copy_admin.exe encrypt-password --passphrase "MyMasterKey" --pass "AliceSecret"
+```
+
+Save the generated line under `[auth]` in `client.conf`:
+```ini
+[auth]
+username = alice
+auth_method = password
+password_encrypted = <generated-base64-blob>
+```
+
+When running the client, it will decrypt the password using the passphrase in `private_key_passphrase`. If `private_key_passphrase` is empty, the client will prompt you for the master passphrase interactively on startup.
+
+---
+
 #### `adduser` — Add a user to the database
 
 ```
@@ -623,7 +670,60 @@ Users in users.csv (3 total):
 ----------------------------------------------------------------------
 ```
 
+---
 
+#### `verify` — Verify user credentials against a remote server
+
+```
+net_copy_admin verify --host HOST --name NAME [--pass PASS] [--key KEY.pem] [--passphrase PASS]
+```
+
+Tests a user's credentials by performing a handshake and authenticating against the remote server. No files are transferred.
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--host` | **Yes** | Server address to connect to (e.g., `127.0.0.1:1245` or `192.168.1.100`) |
+| `--name` | **Yes** | Username to verify |
+| `--pass` | No | Password for password auth (prompts interactively if using password auth and flag is omitted) |
+| `--key` | No | Path to ML-KEM private key file for key auth |
+| `--passphrase` | No | Passphrase if ML-KEM key is encrypted |
+
+```powershell
+# Verify password auth interactively
+.\net_copy_admin.exe verify --host 127.0.0.1:1245 --name alice
+
+# Verify password auth inline
+.\net_copy_admin.exe verify --host 127.0.0.1:1245 --name alice --pass "S3cr3t!"
+
+# Verify ML-KEM key auth
+.\net_copy_admin.exe verify --host 127.0.0.1:1245 --name bob --key bob.pem --passphrase "KeyPass"
+```
+
+---
+
+#### `ls` — List remote directory contents on the server
+
+```
+net_copy_admin ls --host HOST --name NAME [--pass PASS] [--key KEY.pem] [--passphrase PASS] --remote PATH [--recursive]
+```
+
+Lists directories or files on the remote server. Relies on the same authentication options as `verify`.
+
+| Flag | Required | Description |
+|------|----------|-------------|
+| `--host` | **Yes** | Server address (e.g., `127.0.0.1:1245`) |
+| `--name` | **Yes** | Username |
+| `--remote` | **Yes** | Remote path to list on the server (e.g., `/` or `D:/Work/FILES`) |
+| `--recursive` | No | Recurse into subdirectories when listing |
+| Other flags | No | `--pass`, `--key`, and `--passphrase` work exactly as in `verify` |
+
+```powershell
+# List remote allowed root directory
+.\net_copy_admin.exe ls --host 127.0.0.1:1245 --name alice --remote "D:/Work/FILES"
+
+# List recursively using ML-KEM key
+.\net_copy_admin.exe ls --host 127.0.0.1:1245 --name bob --key bob.pem --remote "D:/Work" --recursive
+```
 
 ---
 
@@ -788,6 +888,34 @@ max_bandwidth_percent = 50   # use at most 50% of link speed
 Then transfer normally:
 ```powershell
 .\net_copy_client.exe bigfile.bin 192.168.1.50:D:\Work\
+```
+
+### Download / Pull mode
+
+To pull files or directories from a remote server, pass the `-g`/`--get`/`--download` flag. The first positional argument is the remote source, and the second is the local destination.
+
+```powershell
+# Download a single file from the server
+.\net_copy_client.exe --get 192.168.1.50:D:\Backup\database.sql C:\LocalBackup\
+
+# Download a directory recursively from the server
+.\net_copy_client.exe --get -R 192.168.1.50:D:\Shared\images C:\LocalImages\
+```
+
+### List files remotely on the server
+
+To view directories and files on the remote server without performing a transfer:
+
+```powershell
+.\net_copy_admin.exe ls --host 192.168.1.50:1245 --name alice --remote "D:/Shared"
+```
+
+### Verify client authentication credentials
+
+To test if connection parameters and user credentials (password or ML-KEM keys) are valid:
+
+```powershell
+.\net_copy_admin.exe verify --host 192.168.1.50:1245 --name alice
 ```
 
 ### Minimal server — no auth, localhost only (dev/testing)
