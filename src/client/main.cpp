@@ -4,6 +4,7 @@
 #include "file/file_manager.h"
 #include "crypto/chacha20_poly1305.h"
 #include "crypto/aes_ctr.h"
+#include "crypto/sha3.h"
 #include "crypto/aes_256_gcm_gpu.h"
 #include "common/bandwidth_monitor.h"
 #include <iostream>
@@ -42,6 +43,7 @@ struct CommandLineArgs {
     bool resume = false;
     bool verbose = false;
     bool help = false;
+    bool download = false;
     uint16_t server_port = 0; // Added for client port
     bool empty_dirs_specified = false; // Track if user specified --no-empty-dirs
     bool create_empty_directories = true; // Default value
@@ -67,10 +69,11 @@ void print_usage(const char* program_name) {
     std::cout << "  --no-auto-create           Disable automatic directory creation" << std::endl;
     std::cout << "  --no-empty-dirs            Don't create empty directories" << std::endl;
     std::cout << "  -s, --security LEVEL       Security level: high (default), fast, aes, or AES-256-GCM" << std::endl;
+    std::cout << "  -g, --get, --download      Download/pull file/directory from server" << std::endl;
     std::cout << "  -v, --verbose              Enable verbose logging" << std::endl;
     std::cout << "  -h, --help                 Show this help message" << std::endl << std::endl;
     
-    std::cout << "Destination formats:" << std::endl;
+    std::cout << "Destination formats (Source formats if downloading):" << std::endl;
     std::cout << "  server:port/path           e.g., 127.0.0.1:1245/D:/Work/" << std::endl;
     std::cout << "  server:/path               e.g., 127.0.0.1:/D:/Work/ (uses default/config port)" << std::endl;
     std::cout << "  server:D:\\path             e.g., 127.0.0.1:D:\\Work\\ (Windows path)" << std::endl;
@@ -83,6 +86,8 @@ void print_usage(const char* program_name) {
     std::cout << "  " << program_name << " -R folder/ 127.0.0.1" << std::endl;
     std::cout << "  " << program_name << " ./folder/ 192.168.1.100:/remote/path/ -R" << std::endl;
     std::cout << "  " << program_name << " large_file.zip 192.168.1.100:/downloads/ --resume" << std::endl;
+    std::cout << "  " << program_name << " --get 192.168.1.100:/remote/file.txt ./local_file.txt" << std::endl;
+    std::cout << "  " << program_name << " --get -R 192.168.1.100:/remote/dir ./local_dir" << std::endl;
 }
 
 CommandLineArgs parse_arguments(int argc, char* argv[]) {
@@ -148,6 +153,8 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
             }
         } else if (arg == "-v" || arg == "--verbose") {
             args.verbose = true;
+        } else if (arg == "-g" || arg == "--get" || arg == "--download") {
+            args.download = true;
         } else {
             positional_args.push_back(arg);
         }
@@ -263,12 +270,46 @@ int main(int argc, char* argv[]) {
             }
         }
 
+        // Decrypt password_encrypted if set and password is not already set
+        if (!config.password_encrypted.empty() && config.password.empty()) {
+            std::string master = config.private_key_passphrase;
+            if (master.empty()) {
+                master = netcopy::common::get_password_from_console("Enter passphrase to decrypt stored password: ");
+            }
+            std::vector<uint8_t> salt = {0x6e,0x63,0x70,0x77,0x64,0x73,0x61,0x6c,
+                                          0x74,0x30,0x31,0x32,0x33,0x34,0x35,0x36};
+            auto dk = netcopy::crypto::pbkdf2_sha3_256(master, salt, 100000, 64);
+            std::vector<uint8_t> aes_key(dk.begin(), dk.begin() + 32);
+            std::vector<uint8_t> hmac_key(dk.begin() + 32, dk.end());
+
+            auto blob = netcopy::crypto::base64_decode(config.password_encrypted);
+            if (blob.size() > 32) {
+                std::vector<uint8_t> stored_mac(blob.begin(), blob.begin() + 32);
+                std::vector<uint8_t> ciphertext(blob.begin() + 32, blob.end());
+                auto expected_mac = netcopy::crypto::hmac_sha3_256(hmac_key, ciphertext);
+                if (expected_mac != stored_mac) {
+                    throw std::runtime_error("Wrong passphrase or corrupted password_encrypted value");
+                }
+                
+                netcopy::crypto::AesCtr::Key key_arr;
+                std::copy(aes_key.begin(), aes_key.end(), key_arr.begin());
+                std::vector<uint8_t> iv(hmac_key.begin(), hmac_key.begin() + 16);
+                netcopy::crypto::AesCtr::IV iv_arr;
+                std::copy(iv.begin(), iv.end(), iv_arr.begin());
+                
+                netcopy::crypto::AesCtr cipher(key_arr);
+                auto plaintext = cipher.process(ciphertext, iv_arr);
+                config.password = std::string(plaintext.begin(), plaintext.end());
+            }
+        }
+
         client.set_config(config);
         
         // Reconfigure logging with the updated settings
         auto& logger = netcopy::logging::Logger::instance();
         logger.set_level(netcopy::logging::Logger::string_to_level(config.log_level));
         logger.set_console_output(config.console_output);
+        logger.set_json_format(config.log_format == "json");
         if (!config.log_file.empty()) {
             logger.set_file_output(config.log_file);
         }
@@ -278,7 +319,7 @@ int main(int argc, char* argv[]) {
             std::cout << "Client configuration loaded from: " << config_path_used << std::endl;
         }
 
-        // Parse destination - support multiple formats:
+        // Parse destination (or source if downloading) - support multiple formats:
         // 1. server_address:port/path  (e.g., 127.0.0.1:1245/path)
         // 2. server_address:path       (e.g., 127.0.0.1:/path, uses port from config/command line)
         // 3. server_address            (e.g., 127.0.0.1, uses port from config/command line and default path)
@@ -287,13 +328,16 @@ int main(int argc, char* argv[]) {
         uint16_t server_port = args.server_port; // Use command line port if provided
         std::string remote_path = "/"; // Default path
         
-        size_t colon_pos = args.destination_path.find(":");
+        std::string path_to_parse = args.download ? args.source_path : args.destination_path;
+        std::string local_path = args.download ? args.destination_path : args.source_path;
+        
+        size_t colon_pos = path_to_parse.find(":");
         if (colon_pos == std::string::npos) {
             // Format: server_address (no port, no path)
-            server_address = args.destination_path;
+            server_address = path_to_parse;
         } else {
-            server_address = args.destination_path.substr(0, colon_pos);
-            std::string after_colon = args.destination_path.substr(colon_pos + 1);
+            server_address = path_to_parse.substr(0, colon_pos);
+            std::string after_colon = path_to_parse.substr(colon_pos + 1);
             
             if (after_colon.empty()) {
                 // Format: server_address: (empty after colon)
@@ -306,11 +350,11 @@ int main(int argc, char* argv[]) {
                 // Check if it's a port number or path
                 // Look for path separator to determine where port ends
                 size_t slash_pos = after_colon.find_first_of("/\\");
-                size_t colon_pos = after_colon.find(':');
+                size_t colon_pos_inner = after_colon.find(':');
                 
                 // Handle cases like "1245:D:/Work/" (invalid format)
-                if (colon_pos != std::string::npos && colon_pos < slash_pos) {
-                    std::cerr << "Error: Invalid destination format. Multiple colons detected." << std::endl;
+                if (colon_pos_inner != std::string::npos && colon_pos_inner < slash_pos) {
+                    std::cerr << "Error: Invalid remote format. Multiple colons detected." << std::endl;
                     std::cerr << "Use: server:port/path  (e.g., 127.0.0.1:1245/D:/Work/)" << std::endl;
                     std::cerr << "Or:  server:path       (e.g., 127.0.0.1:D:/Work/)" << std::endl;
                     return 1;
@@ -347,7 +391,7 @@ int main(int argc, char* argv[]) {
         if (server_address.empty()) {
             std::cerr << "Error: Missing server address" << std::endl;
             std::cerr << "Usage: " << argv[0] << " [options] <source> <destination>" << std::endl;
-            std::cerr << "Destination formats:" << std::endl;
+            std::cerr << "Destination formats (Source formats if downloading):" << std::endl;
             std::cerr << "  server_address:port/path  (e.g., 127.0.0.1:1245/remote/path)" << std::endl;
             std::cerr << "  server_address:/path      (e.g., 127.0.0.1:/remote/path, uses default port)" << std::endl;
             std::cerr << "  server_address            (e.g., 127.0.0.1, uses default port and path)" << std::endl;
@@ -406,6 +450,10 @@ int main(int argc, char* argv[]) {
             std::cout << "Security level: " << level_name << std::endl;
             std::cout << "Connecting to " << server_address << ":" << server_port << std::endl;
         }
+        if (args.security_level == netcopy::crypto::SecurityLevel::FAST) {
+            std::cerr << "WARNING: 'fast' mode uses XOR cipher which provides NO real security. Use only on trusted local networks." << std::endl;
+        }
+
         client.connect(server_address, server_port);
         if (args.verbose) {
             std::cout << "Connected successfully" << std::endl;
@@ -473,19 +521,54 @@ int main(int argc, char* argv[]) {
             }
         }));
 
-        if (netcopy::file::FileManager::is_directory(args.source_path)) {
-            if (!args.recursive) {
-                throw std::runtime_error("Cannot transfer directory without -R/--recursive flag. Use -R to transfer directories recursively.");
+        if (args.download) {
+            bool is_dir = false;
+            try {
+                // Try listing the path to see if it is a directory
+                client.list_remote_directory(remote_path, false);
+                is_dir = true;
+            } catch (const std::exception&) {
+                // Assume it's a file or not found (download_file will handle file-not-found)
+                is_dir = false;
             }
-            std::string source_name = netcopy::file::FileManager::get_filename(args.source_path);
-            std::cout << "Transferring directory: " << source_name << std::endl;
-            client.transfer_directory(args.source_path, remote_path, args.recursive, args.resume);
-            std::cout << std::endl << "Directory transfer completed: " << source_name << std::endl;
+
+            if (is_dir) {
+                if (!args.recursive) {
+                    throw std::runtime_error("Cannot transfer directory without -R/--recursive flag. Use -R to transfer directories recursively.");
+                }
+                std::string remote_name = remote_path;
+                size_t last_slash = remote_path.find_last_of("/\\");
+                if (last_slash != std::string::npos) {
+                    remote_name = remote_path.substr(last_slash + 1);
+                }
+                std::cout << "Downloading directory: " << remote_name << std::endl;
+                client.download_directory(remote_path, local_path, args.recursive);
+                std::cout << std::endl << "Directory download completed: " << remote_name << std::endl;
+            } else {
+                std::string filename = remote_path;
+                size_t last_slash = remote_path.find_last_of("/\\");
+                if (last_slash != std::string::npos) {
+                    filename = remote_path.substr(last_slash + 1);
+                }
+                std::cout << "Downloading file: " << filename << std::endl;
+                client.download_file(remote_path, local_path);
+                std::cout << std::endl << "File download completed: " << filename << std::endl;
+            }
         } else {
-            std::string filename = netcopy::file::FileManager::get_filename(args.source_path);
-            std::cout << "Transferring file: " << filename << std::endl;
-            client.transfer_file(args.source_path, remote_path, args.resume);
-            std::cout << std::endl << "File transfer completed: " << filename << std::endl;
+            if (netcopy::file::FileManager::is_directory(local_path)) {
+                if (!args.recursive) {
+                    throw std::runtime_error("Cannot transfer directory without -R/--recursive flag. Use -R to transfer directories recursively.");
+                }
+                std::string source_name = netcopy::file::FileManager::get_filename(local_path);
+                std::cout << "Transferring directory: " << source_name << std::endl;
+                client.transfer_directory(local_path, remote_path, args.recursive, args.resume);
+                std::cout << std::endl << "Directory transfer completed: " << source_name << std::endl;
+            } else {
+                std::string filename = netcopy::file::FileManager::get_filename(local_path);
+                std::cout << "Transferring file: " << filename << std::endl;
+                client.transfer_file(local_path, remote_path, args.resume);
+                std::cout << std::endl << "File transfer completed: " << filename << std::endl;
+            }
         }
 
 #ifdef _WIN32

@@ -279,6 +279,24 @@ void Socket::close() {
     }
 }
 
+std::string Socket::get_peer_address() const {
+    sockaddr_in addr{};
+    socklen_t addr_len = sizeof(addr);
+    if (::getpeername(socket_, reinterpret_cast<sockaddr*>(&addr), &addr_len) == 0) {
+        char ip_str[INET_ADDRSTRLEN] = {};
+#ifdef _WIN32
+        // On Windows, use inet_ntoa (universally available)
+        const char* result = inet_ntoa(addr.sin_addr);
+        if (result) {
+            std::snprintf(ip_str, sizeof(ip_str), "%s", result);
+        }
+#else
+        inet_ntop(AF_INET, &addr.sin_addr, ip_str, sizeof(ip_str));
+#endif
+        return std::string(ip_str) + ":" + std::to_string(ntohs(addr.sin_port));
+    }
+    return "unknown";
+}
+
 } // namespace network
 } // namespace netcopy
-

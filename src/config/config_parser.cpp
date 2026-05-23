@@ -234,9 +234,12 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
     
     config.max_bandwidth_percent = parser.get_int("performance", "max_bandwidth_percent", 0);
     config.max_chunk_size = static_cast<size_t>(parser.get_int("performance", "max_chunk_size", 10485760));
+    config.socket_buffer_size = parser.get_int("performance", "socket_buffer_size", 0);
     
     config.log_level = parser.get_string("logging", "log_level", "INFO");
     config.log_file = parser.get_string("logging", "log_file", "server.log");
+    config.log_format = parser.get_string("logging", "log_format", "text");
+    config.audit_log_file = parser.get_string("logging", "audit_log", "");
     config.console_output = parser.get_bool("logging", "console_output", true);
     
     config.run_as_daemon = parser.get_bool("daemon", "run_as_daemon", false);
@@ -268,9 +271,12 @@ ServerConfig ServerConfig::get_default() {
     
     config.max_bandwidth_percent = 0;
     config.max_chunk_size = 10485760;
+    config.socket_buffer_size = 0;
     
     config.log_level = "INFO";
     config.log_file = "server.log";
+    config.log_format = "text";
+    config.audit_log_file = "";
     config.console_output = true;
     
     config.run_as_daemon = false;
@@ -302,9 +308,11 @@ ClientConfig ClientConfig::load_from_file(const std::string& filename) {
     config.max_chunk_size = static_cast<size_t>(parser.get_int("performance", "max_chunk_size", 10485760));
     config.chunk_size_increase_factor = std::stod(parser.get_string("performance", "chunk_size_increase_factor", "1.1"));
     config.chunk_size_decrease_factor = std::stod(parser.get_string("performance", "chunk_size_decrease_factor", "0.5"));
+    config.socket_buffer_size = parser.get_int("performance", "socket_buffer_size", 0);
     
     config.log_level = parser.get_string("logging", "log_level", "INFO");
     config.log_file = parser.get_string("logging", "log_file", "client.log");
+    config.log_format = parser.get_string("logging", "log_format", "text");
     config.console_output = parser.get_bool("logging", "console_output", true);
     
     config.timeout = parser.get_int("connection", "timeout", 30);
@@ -317,6 +325,7 @@ ClientConfig ClientConfig::load_from_file(const std::string& filename) {
     // Auth settings
     config.username               = parser.get_string("auth", "username", "");
     config.password               = parser.get_string("auth", "password", "");
+    config.password_encrypted     = parser.get_string("auth", "password_encrypted", "");
     config.auth_method            = parser.get_string("auth", "auth_method", "none");
     config.private_key_file       = parser.get_string("auth", "private_key_file", "");
     config.private_key_passphrase = parser.get_string("auth", "private_key_passphrase", "");
@@ -336,9 +345,11 @@ ClientConfig ClientConfig::get_default() {
     config.max_chunk_size = 10485760;
     config.chunk_size_increase_factor = 1.1;
     config.chunk_size_decrease_factor = 0.5;
+    config.socket_buffer_size = 0;
     
     config.log_level = "INFO";
     config.log_file = "client.log";
+    config.log_format = "text";
     config.console_output = true;
     
     config.timeout = 30;
@@ -351,6 +362,7 @@ ClientConfig ClientConfig::get_default() {
     // Auth settings defaults
     config.username               = "";
     config.password               = "";
+    config.password_encrypted     = "";
     config.auth_method            = "none";
     config.private_key_file       = "";
     config.private_key_passphrase = "";

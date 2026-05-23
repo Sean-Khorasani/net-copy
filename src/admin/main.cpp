@@ -4,7 +4,10 @@
 #include "crypto/sha3.h"
 #include "crypto/mlkem.h"
 #include "crypto/key_manager.h"
+#include "crypto/aes_ctr.h"
+#include "client/client.h"
 #include "exceptions.h"
+#include <iomanip>
 
 #include <iostream>
 #include <string>
@@ -343,6 +346,167 @@ static void cmd_listusers(const std::map<std::string, std::string>& args) {
     }
 }
 
+static void cmd_encrypt_password(const std::map<std::string, std::string>& args) {
+    std::string master;
+    if (args.count("passphrase")) {
+        master = args.at("passphrase");
+    } else {
+        master = prompt_password("Enter master passphrase: ");
+        std::string confirm = prompt_password("Confirm passphrase: ");
+        if (master != confirm) { std::cerr << "Error: passphrases do not match\n"; return; }
+    }
+
+    std::string password;
+    if (args.count("pass")) {
+        password = args.at("pass");
+    } else {
+        password = prompt_password("Enter password to encrypt: ");
+    }
+
+    // Derive key
+    std::vector<uint8_t> salt = {0x6e,0x63,0x70,0x77,0x64,0x73,0x61,0x6c,
+                                  0x74,0x30,0x31,0x32,0x33,0x34,0x35,0x36};
+    auto dk = netcopy::crypto::pbkdf2_sha3_256(master, salt, 100000, 64);
+    std::vector<uint8_t> aes_key(dk.begin(), dk.begin() + 32);
+    std::vector<uint8_t> hmac_key(dk.begin() + 32, dk.end());
+
+    // Encrypt
+    netcopy::crypto::AesCtr::Key key_arr;
+    std::copy(aes_key.begin(), aes_key.end(), key_arr.begin());
+    std::vector<uint8_t> iv(hmac_key.begin(), hmac_key.begin() + 16);
+    netcopy::crypto::AesCtr::IV iv_arr;
+    std::copy(iv.begin(), iv.end(), iv_arr.begin());
+
+    netcopy::crypto::AesCtr cipher(key_arr);
+    std::vector<uint8_t> pw_bytes(password.begin(), password.end());
+    auto ciphertext = cipher.process(pw_bytes, iv_arr);
+
+    // HMAC
+    auto mac = netcopy::crypto::hmac_sha3_256(hmac_key, ciphertext);
+
+    // Blob = MAC || ciphertext
+    std::vector<uint8_t> blob;
+    blob.insert(blob.end(), mac.begin(), mac.end());
+    blob.insert(blob.end(), ciphertext.begin(), ciphertext.end());
+
+    std::string encoded = netcopy::crypto::base64_encode(blob);
+    std::cout << "Add this to [auth] section of client.conf:\n";
+    std::cout << "password_encrypted = " << encoded << "\n";
+    std::cout << "(remove the 'password = ...' line if present)\n";
+}
+
+static void cmd_verify(const std::map<std::string, std::string>& args) {
+    if (!args.count("host") || !args.count("name")) {
+        std::cerr << "Error: --host and --name are required\n";
+        return;
+    }
+
+    std::string host_str = args.at("host");
+    std::string name = args.at("name");
+
+    std::string host = host_str;
+    uint16_t port = 1245;
+    size_t colon = host_str.find(':');
+    if (colon != std::string::npos) {
+        host = host_str.substr(0, colon);
+        port = static_cast<uint16_t>(std::stoi(host_str.substr(colon + 1)));
+    }
+
+    netcopy::client::Client client;
+    netcopy::config::ClientConfig config = netcopy::config::ClientConfig::get_default();
+    config.username = name;
+    config.console_output = false;
+
+    if (args.count("pass")) {
+        config.password = args.at("pass");
+        config.auth_method = "password";
+    } else if (args.count("key")) {
+        config.private_key_file = args.at("key");
+        config.auth_method = "mlkem";
+        if (args.count("passphrase")) {
+            config.private_key_passphrase = args.at("passphrase");
+        }
+    } else {
+        config.password = prompt_password("Enter password for " + name + ": ");
+        config.auth_method = "password";
+    }
+
+    client.set_config(config);
+    std::cout << "Verifying credentials for " << name << " on " << host << ":" << port << "...\n";
+    
+    try {
+        client.connect(host, port);
+        std::cout << "SUCCESS: Authentication verified successfully!\n";
+        client.disconnect();
+    } catch (const std::exception& e) {
+        std::cerr << "FAILED: Verification failed: " << e.what() << "\n";
+    }
+}
+
+static void cmd_ls(const std::map<std::string, std::string>& args) {
+    if (!args.count("host") || !args.count("name") || !args.count("remote")) {
+        std::cerr << "Error: --host, --name, and --remote are required\n";
+        return;
+    }
+
+    std::string host_str = args.at("host");
+    std::string name = args.at("name");
+    std::string remote_path = args.at("remote");
+    bool recursive = args.count("recursive") > 0;
+
+    std::string host = host_str;
+    uint16_t port = 1245;
+    size_t colon = host_str.find(':');
+    if (colon != std::string::npos) {
+        host = host_str.substr(0, colon);
+        port = static_cast<uint16_t>(std::stoi(host_str.substr(colon + 1)));
+    }
+
+    netcopy::client::Client client;
+    netcopy::config::ClientConfig config = netcopy::config::ClientConfig::get_default();
+    config.username = name;
+    config.console_output = false;
+
+    if (args.count("pass")) {
+        config.password = args.at("pass");
+        config.auth_method = "password";
+    } else if (args.count("key")) {
+        config.private_key_file = args.at("key");
+        config.auth_method = "mlkem";
+        if (args.count("passphrase")) {
+            config.private_key_passphrase = args.at("passphrase");
+        }
+    } else {
+        config.password = prompt_password("Enter password for " + name + ": ");
+        config.auth_method = "password";
+    }
+
+    client.set_config(config);
+    
+    try {
+        client.connect(host, port);
+        auto entries = client.list_remote_directory(remote_path, recursive);
+        client.disconnect();
+
+        std::cout << "Listing remote path: " << remote_path << " (" << entries.size() << " entries):\n";
+        std::cout << std::string(80, '-') << "\n";
+        std::cout << std::left << std::setw(45) << "Path" 
+                  << std::right << std::setw(15) << "Size (Bytes)" 
+                  << std::right << std::setw(20) << "Type" << "\n";
+        std::cout << std::string(80, '-') << "\n";
+        
+        for (const auto& entry : entries) {
+            std::string type_str = entry.is_directory ? "Directory" : "File";
+            std::cout << std::left << std::setw(45) << entry.path
+                      << std::right << std::setw(15) << entry.size
+                      << std::right << std::setw(20) << type_str << "\n";
+        }
+        std::cout << std::string(80, '-') << "\n";
+    } catch (const std::exception& e) {
+        std::cerr << "Error: Listing failed: " << e.what() << "\n";
+    }
+}
+
 static void print_usage() {
     std::cout << R"(net_copy_admin - Administration tool for net_copy
 
@@ -360,6 +524,9 @@ Usage:
   net_copy_admin decrypt-key KEY.pem [--passphrase PASS] [--out OUT.pem]
       Decrypt an encrypted private key file
 
+  net_copy_admin encrypt-password [--passphrase PASS] [--pass PASSWORD]
+      Encrypt a password for storage in client.conf as password_encrypted
+
   net_copy_admin adduser --users USERS.CSV --name NAME [--pass PASS]
                          [--pubkey KEY.pub] [--paths PATH1,PATH2]
                          [--methods password,mlkem]
@@ -376,6 +543,12 @@ Usage:
 
   net_copy_admin listusers --users USERS.CSV
       List all users with their auth methods and paths
+
+  net_copy_admin verify --host HOST --name NAME [--pass PASS] [--key KEY.pem] [--passphrase PASS]
+      Verify user credentials against the remote server
+
+  net_copy_admin ls --host HOST --name NAME [--pass PASS] [--key KEY.pem] [--passphrase PASS] --remote PATH [--recursive]
+      List remote files on the server
 )";
 }
 
@@ -414,6 +587,12 @@ int main(int argc, char* argv[]) {
             cmd_deluser(args);
         } else if (cmd == "listusers") {
             cmd_listusers(args);
+        } else if (cmd == "encrypt-password") {
+            cmd_encrypt_password(args);
+        } else if (cmd == "verify") {
+            cmd_verify(args);
+        } else if (cmd == "ls") {
+            cmd_ls(args);
         } else {
             std::cerr << "Unknown command: " << cmd << "\n";
             print_usage();

@@ -165,6 +165,21 @@ std::unique_ptr<Message> Message::deserialize(const std::vector<uint8_t>& data) 
         case MessageType::AUTH_RESULT:
             message = std::make_unique<AuthResult>();
             break;
+        case MessageType::DOWNLOAD_REQUEST:
+            message = std::make_unique<DownloadRequest>();
+            break;
+        case MessageType::DOWNLOAD_RESPONSE:
+            message = std::make_unique<DownloadResponse>();
+            break;
+        case MessageType::LIST_REQUEST:
+            message = std::make_unique<ListRequest>();
+            break;
+        case MessageType::LIST_RESPONSE:
+            message = std::make_unique<ListResponse>();
+            break;
+        case MessageType::DISCONNECT:
+            message = std::make_unique<Disconnect>();
+            break;
         default:
             throw ProtocolException("Unknown message type");
     }
@@ -539,6 +554,115 @@ void AuthResult::deserialize_payload(const std::vector<uint8_t>& data) {
     if (offset < data.size()) {
         error_message = read_string(data, offset);
     }
+}
+
+// DownloadRequest implementation
+DownloadRequest::DownloadRequest()
+    : Message(MessageType::DOWNLOAD_REQUEST) {}
+
+std::vector<uint8_t> DownloadRequest::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    write_string(buffer, remote_path);
+    return buffer;
+}
+
+void DownloadRequest::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    remote_path = read_string(data, offset);
+}
+
+// DownloadResponse implementation
+DownloadResponse::DownloadResponse()
+    : Message(MessageType::DOWNLOAD_RESPONSE),
+      success(false),
+      file_size(0),
+      is_directory(false) {}
+
+std::vector<uint8_t> DownloadResponse::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    buffer.push_back(success ? 1 : 0);
+    write_string(buffer, error_message);
+    write_uint64(buffer, file_size);
+    buffer.push_back(is_directory ? 1 : 0);
+    return buffer;
+}
+
+void DownloadResponse::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    if (offset >= data.size()) throw ProtocolException("DownloadResponse: missing success byte");
+    success = data[offset++] != 0;
+    error_message = read_string(data, offset);
+    file_size = read_uint64(data, offset);
+    if (offset >= data.size()) throw ProtocolException("DownloadResponse: missing is_directory byte");
+    is_directory = data[offset++] != 0;
+}
+
+// ListRequest implementation
+ListRequest::ListRequest()
+    : Message(MessageType::LIST_REQUEST),
+      recursive(false) {}
+
+std::vector<uint8_t> ListRequest::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    write_string(buffer, remote_path);
+    buffer.push_back(recursive ? 1 : 0);
+    return buffer;
+}
+
+void ListRequest::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    remote_path = read_string(data, offset);
+    if (offset >= data.size()) throw ProtocolException("ListRequest: missing recursive byte");
+    recursive = data[offset++] != 0;
+}
+
+// ListResponse implementation
+ListResponse::ListResponse()
+    : Message(MessageType::LIST_RESPONSE),
+      success(false) {}
+
+std::vector<uint8_t> ListResponse::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    buffer.push_back(success ? 1 : 0);
+    write_string(buffer, error_message);
+    write_uint32(buffer, static_cast<uint32_t>(entries.size()));
+    for (const auto& e : entries) {
+        write_string(buffer, e.path);
+        write_uint64(buffer, e.size);
+        buffer.push_back(e.is_directory ? 1 : 0);
+        write_uint64(buffer, e.last_modified);
+    }
+    return buffer;
+}
+
+void ListResponse::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    if (offset >= data.size()) throw ProtocolException("ListResponse: missing success byte");
+    success = data[offset++] != 0;
+    error_message = read_string(data, offset);
+    uint32_t size = read_uint32(data, offset);
+    entries.clear();
+    for (uint32_t i = 0; i < size; ++i) {
+        RemoteFileInfo info;
+        info.path = read_string(data, offset);
+        info.size = read_uint64(data, offset);
+        if (offset >= data.size()) throw ProtocolException("ListResponse: missing entry is_directory byte");
+        info.is_directory = data[offset++] != 0;
+        info.last_modified = read_uint64(data, offset);
+        entries.push_back(info);
+    }
+}
+
+// Disconnect implementation
+Disconnect::Disconnect()
+    : Message(MessageType::DISCONNECT) {}
+
+std::vector<uint8_t> Disconnect::serialize_payload() const {
+    return std::vector<uint8_t>();
+}
+
+void Disconnect::deserialize_payload(const std::vector<uint8_t>& data) {
+    // No payload
 }
 
 } // namespace protocol

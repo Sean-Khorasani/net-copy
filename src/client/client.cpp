@@ -8,6 +8,11 @@
 #include "crypto/mlkem.h"
 #include "crypto/key_manager.h"
 #include "protocol/message.h"
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#endif
 #include <algorithm>
 #include <exception>
 #include <mutex>
@@ -88,9 +93,11 @@ void Client::connect(const std::string& server_address, uint16_t port) {
         socket_->set_timeout(config_.timeout);
         socket_->connect(server_address, port);
         
-        // Disable Nagle's algorithm and tune buffer sizes to 4MB
+        // Disable Nagle's algorithm; respect configurable socket buffer sizes
         socket_->set_tcp_nodelay(true);
-        socket_->set_buffer_sizes(4 * 1024 * 1024, 4 * 1024 * 1024);
+        if (config_.socket_buffer_size > 0) {
+            socket_->set_buffer_sizes(config_.socket_buffer_size, config_.socket_buffer_size);
+        }
         
         server_address_ = server_address;
         server_port_ = port;
@@ -281,7 +288,7 @@ void Client::send_message(const protocol::Message& message) {
         data = encrypt_message(data);
     }
 
-    uint32_t length = static_cast<uint32_t>(data.size());
+    uint32_t length = htonl(static_cast<uint32_t>(data.size()));
     socket_->send(&length, sizeof(length));
 
     size_t total_sent = 0;
@@ -295,8 +302,9 @@ std::unique_ptr<protocol::Message> Client::receive_message() {
         throw NetworkException("Socket is not connected");
     }
 
-    uint32_t length = 0;
-    socket_->receive(&length, sizeof(length));
+    uint32_t length_net = 0;
+    socket_->receive(&length_net, sizeof(length_net));
+    uint32_t length = ntohl(length_net);
 
     std::vector<uint8_t> data(length);
     size_t total_received = 0;
@@ -805,6 +813,124 @@ void Client::clear_error() {
 
 uint32_t Client::get_next_sequence_number() {
     return sequence_number_++;
+}
+
+void Client::download_file(const std::string& remote_path, const std::string& local_path) {
+    if (!socket_) {
+        throw NetworkException("Socket is not connected");
+    }
+
+    protocol::DownloadRequest request;
+    request.remote_path = remote_path;
+    send_message(request);
+
+    auto response_msg = receive_message();
+    auto response = dynamic_cast<protocol::DownloadResponse*>(response_msg.get());
+    if (!response) {
+        throw ProtocolException("Expected DownloadResponse");
+    }
+
+    if (!response->success) {
+        throw FileException("Download failed: " + response->error_message);
+    }
+
+    if (response->is_directory) {
+        file::FileManager::create_directories(local_path);
+        return;
+    }
+
+    // Open local file
+    file::FileStream fs;
+    if (!fs.open_write(local_path)) {
+        throw FileException("Failed to open local file for writing: " + local_path);
+    }
+
+    uint64_t total_bytes = response->file_size;
+    uint64_t bytes_received = 0;
+
+    while (bytes_received < total_bytes) {
+        auto msg = receive_message();
+        auto file_data = dynamic_cast<protocol::FileData*>(msg.get());
+        if (!file_data) {
+            throw ProtocolException("Expected FileData");
+        }
+
+        try {
+            fs.write(file_data->offset, file_data->data.data(), file_data->data.size());
+        } catch (const std::exception& e) {
+            protocol::FileAck ack;
+            ack.success = false;
+            ack.bytes_received = bytes_received;
+            ack.error_message = std::string("Disk write failed: ") + e.what();
+            send_message(ack);
+            throw FileException("Failed to write data to local file");
+        }
+
+        bytes_received += file_data->data.size();
+
+        // Send success ACK
+        protocol::FileAck ack;
+        ack.success = true;
+        ack.bytes_received = bytes_received;
+        send_message(ack);
+
+        if (progress_callback_) {
+            progress_callback_(bytes_received, total_bytes, remote_path);
+        }
+
+        if (file_data->is_last_chunk) {
+            break;
+        }
+    }
+    fs.close();
+}
+
+std::vector<protocol::RemoteFileInfo> Client::list_remote_directory(const std::string& remote_path, bool recursive) {
+    if (!socket_) {
+        throw NetworkException("Socket is not connected");
+    }
+
+    protocol::ListRequest request;
+    request.remote_path = remote_path;
+    request.recursive = recursive;
+    send_message(request);
+
+    auto response_msg = receive_message();
+    auto response = dynamic_cast<protocol::ListResponse*>(response_msg.get());
+    if (!response) {
+        throw ProtocolException("Expected ListResponse");
+    }
+
+    if (!response->success) {
+        throw FileException("Listing failed: " + response->error_message);
+    }
+
+    return response->entries;
+}
+
+void Client::download_directory(const std::string& remote_path, const std::string& local_path, bool recursive) {
+    auto entries = list_remote_directory(remote_path, recursive);
+    for (const auto& entry : entries) {
+        std::string rel_path = entry.path;
+        if (rel_path.rfind(remote_path, 0) == 0) {
+            rel_path = rel_path.substr(remote_path.length());
+        }
+        while (!rel_path.empty() && (rel_path[0] == '/' || rel_path[0] == '\\')) {
+            rel_path = rel_path.substr(1);
+        }
+        
+        std::string full_local = file::FileManager::join_path(local_path, rel_path);
+        
+        if (entry.is_directory) {
+            file::FileManager::create_directories(full_local);
+        } else {
+            std::string parent_dir = file::FileManager::get_directory(full_local);
+            if (!parent_dir.empty()) {
+                file::FileManager::create_directories(parent_dir);
+            }
+            download_file(entry.path, full_local);
+        }
+    }
 }
 
 } // namespace client

@@ -29,6 +29,11 @@ void Logger::set_console_output(bool enable) {
     console_output_ = enable;
 }
 
+void Logger::set_json_format(bool enable) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    json_format_ = enable;
+}
+
 void Logger::log(LogLevel level, const std::string& message) {
     std::lock_guard<std::mutex> lock(mutex_);
     
@@ -99,11 +104,26 @@ std::string Logger::level_to_string(LogLevel level) {
 }
 
 std::string Logger::format_message(LogLevel level, const std::string& message) {
-    std::ostringstream oss;
-    oss << "[" << get_timestamp() << "] "
-        << "[" << level_to_string(level) << "] "
-        << message;
-    return oss.str();
+    if (json_format_) {
+        std::string escaped_message;
+        for (char c : message) {
+            if (c == '"') escaped_message += "\\\"";
+            else if (c == '\\') escaped_message += "\\\\";
+            else if (c == '\n') escaped_message += "\\n";
+            else if (c == '\r') escaped_message += "\\r";
+            else if (c == '\t') escaped_message += "\\t";
+            else escaped_message += c;
+        }
+        std::ostringstream oss;
+        oss << "{\"ts\":\"" << get_timestamp() << "\",\"level\":\"" << level_to_string(level) << "\",\"msg\":\"" << escaped_message << "\"}";
+        return oss.str();
+    } else {
+        std::ostringstream oss;
+        oss << "[" << get_timestamp() << "] "
+            << "[" << level_to_string(level) << "] "
+            << message;
+        return oss.str();
+    }
 }
 
 std::string Logger::get_timestamp() {

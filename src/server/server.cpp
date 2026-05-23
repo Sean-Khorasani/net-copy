@@ -8,12 +8,33 @@
 #include "auth/user_db.h"
 #include "auth/auth_engine.h"
 #include "crypto/sha3.h"
+#include "logging/audit_log.h"
 #include <algorithm>
-#include <vector> // Added for std::vector
-#include <iostream> // Added for debug output
+#include <vector>
+#include <iostream>
 
 namespace netcopy {
 namespace server {
+
+// Helper: derive session key from base key + ML-KEM material (Task 4)
+static std::vector<uint8_t> derive_session_key(
+    const std::string& base_key_hex,
+    const std::vector<uint8_t>& session_secret,
+    const std::vector<uint8_t>& server_nonce,
+    const std::vector<uint8_t>& client_nonce)
+{
+    std::string hex = base_key_hex;
+    if (hex.size() > 2 && hex.substr(0, 2) == "0x") hex = hex.substr(2);
+    auto base_key = netcopy::common::from_hex_string(hex);
+
+    std::vector<uint8_t> material;
+    material.insert(material.end(), base_key.begin(), base_key.end());
+    material.insert(material.end(), session_secret.begin(), session_secret.end());
+    material.insert(material.end(), server_nonce.begin(), server_nonce.end());
+    material.insert(material.end(), client_nonce.begin(), client_nonce.end());
+
+    return netcopy::crypto::sha3_256(material);
+}
 
 // ConnectionHandler implementation
 ConnectionHandler::ConnectionHandler(network::Socket client_socket, 
@@ -32,9 +53,12 @@ ConnectionHandler::ConnectionHandler(network::Socket client_socket,
                  " (" + std::to_string(user_db_.users().size()) + " users)");
     }
     
-    // Disable Nagle's algorithm and tune buffer sizes to 4MB for the server's client socket
+    // Disable Nagle's algorithm; respect configurable socket buffer sizes
     client_socket_.set_tcp_nodelay(true);
-    client_socket_.set_buffer_sizes(4 * 1024 * 1024, 4 * 1024 * 1024);
+    if (config_.socket_buffer_size > 0) {
+        client_socket_.set_buffer_sizes(config_.socket_buffer_size, config_.socket_buffer_size);
+    }
+    // If 0, leave OS default (auto-tuning)
 }
 
 ConnectionHandler::~ConnectionHandler() {
@@ -66,6 +90,20 @@ void ConnectionHandler::handle() {
                     }
                     break;
                 }
+                case protocol::MessageType::DOWNLOAD_REQUEST: {
+                    auto req = dynamic_cast<protocol::DownloadRequest*>(message.get());
+                    if (req) handle_download_request(*req);
+                    break;
+                }
+                case protocol::MessageType::LIST_REQUEST: {
+                    auto req = dynamic_cast<protocol::ListRequest*>(message.get());
+                    if (req) handle_list_request(*req);
+                    break;
+                }
+                case protocol::MessageType::DISCONNECT: {
+                    LOG_INFO("Client " + client_address_ + " disconnected gracefully");
+                    return;
+                }
                 default:
                     LOG_WARNING("Received unknown message type from " + client_address_);
                     break;
@@ -74,9 +112,11 @@ void ConnectionHandler::handle() {
         
     } catch (const std::exception& e) {
         LOG_ERROR("Connection error with " + client_address_ + ": " + e.what());
+        logging::AuditLog::instance().log_connect("", client_address_, false);
     }
     
     LOG_INFO("Connection closed with " + client_address_);
+    logging::AuditLog::instance().log_disconnect(authenticated_user_, client_address_);
 }
 
 void ConnectionHandler::perform_handshake() {
@@ -120,6 +160,10 @@ void ConnectionHandler::perform_handshake() {
     response.authentication_required = config_.require_auth;
     response.accepted_security_level = negotiated_security_level_;
     response.max_chunk_size = negotiated_max_chunk_size_;
+    
+    // Save nonces for session key derivation (Task 4)
+    server_nonce_from_handshake_ = response.server_nonce;
+    client_nonce_from_handshake_ = request->client_nonce;
     
     send_message(response);
     
@@ -171,17 +215,43 @@ void ConnectionHandler::perform_handshake() {
             }
 
             bool ok = engine.verify_response(challenge, auth_resp->proof);
-            protocol::AuthResult result;
-            result.success = ok;
-            result.error_message = ok ? "" : "Invalid credentials";
-            send_message(result);
 
             if (!ok) {
+                auth_failure_count_++;
+                LOG_WARNING("Auth failure " + std::to_string(auth_failure_count_) +
+                            "/" + std::to_string(MAX_AUTH_FAILURES) +
+                            " from " + client_address_);
+                protocol::AuthResult result_fail;
+                result_fail.success = false;
+                result_fail.error_message = "Invalid credentials";
+                send_message(result_fail);
+                if (auth_failure_count_ >= MAX_AUTH_FAILURES) {
+                    throw AuthException("Too many authentication failures from " + client_address_);
+                }
                 throw AuthException("Authentication failed for user: " + request->username);
             }
 
+            protocol::AuthResult result;
+            result.success = true;
+            result.error_message = "";
+            send_message(result);
+
             authenticated_user_ = request->username;
             LOG_INFO("User '" + request->username + "' authenticated successfully");
+
+            // Re-derive transport key mixing in the ML-KEM shared secret for forward secrecy
+            if (method == auth::AuthMethod::MLKEM && crypto_engine_) {
+                auto derived = derive_session_key(
+                    config_.secret_key,
+                    challenge.kem_ciphertext,
+                    server_nonce_from_handshake_,
+                    client_nonce_from_handshake_);
+                std::string hex_derived = common::to_hex_string(derived);
+                crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, "0x" + hex_derived);
+                LOG_DEBUG("Session key derived from ML-KEM shared material");
+            }
+            // Emit audit log connect on success
+            logging::AuditLog::instance().log_connect(authenticated_user_, client_address_, true);
         }
     }
 
@@ -322,6 +392,11 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
             }
 
             uint64_t end_offset = chunk.offset + payload.size();
+            // Enforce max_file_size if configured (Task 3)
+            if (config_.max_file_size > 0 && end_offset > config_.max_file_size) {
+                throw FileException("File exceeds maximum allowed size of " +
+                                    std::to_string(config_.max_file_size) + " bytes");
+            }
             if (end_offset > max_bytes_received) {
                 max_bytes_received = end_offset;
             }
@@ -345,6 +420,10 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
     if (ack.success && message_completes_transfer) {
         current_transfer_completed_ = true;
         current_file_stream_.close();
+        // Audit log the completed upload
+        logging::AuditLog::instance().log_transfer(
+            authenticated_user_, client_address_,
+            current_file_path_, ack.bytes_received, 0.0, "", true);
     }
 }
 
@@ -355,8 +434,8 @@ void ConnectionHandler::send_message(const protocol::Message& message) {
         data = encrypt_message(data);
     }
     
-    // Send message length first
-    uint32_t length = static_cast<uint32_t>(data.size());
+    // Send message length first (network byte order)
+    uint32_t length = htonl(static_cast<uint32_t>(data.size()));
     client_socket_.send(&length, sizeof(length));
     
     // Send message data
@@ -368,10 +447,10 @@ void ConnectionHandler::send_message(const protocol::Message& message) {
 }
 
 std::unique_ptr<protocol::Message> ConnectionHandler::receive_message() {
-    // Receive message length
-    uint32_t length;
-    client_socket_.receive(&length, sizeof(length));
-    
+    // Receive message length (network byte order)
+    uint32_t length_net;
+    client_socket_.receive(&length_net, sizeof(length_net));
+    uint32_t length = ntohl(length_net);
     
     // Receive message data
     std::vector<uint8_t> data(length);
@@ -475,9 +554,7 @@ uint32_t ConnectionHandler::get_next_sequence_number() {
 }
 
 std::string ConnectionHandler::get_client_address() {
-    // This is a simplified implementation
-    // In a real implementation, you would extract the actual client address
-    return "client";
+    return client_socket_.get_peer_address();
 }
 
 // Server implementation
@@ -499,6 +576,13 @@ void Server::load_config(const std::string& config_file) {
         logger.set_console_output(config_.console_output);
         if (!config_.log_file.empty()) {
             logger.set_file_output(config_.log_file);
+        }
+        logger.set_json_format(config_.log_format == "json");
+        
+        // Initialize audit log if configured
+        if (!config_.audit_log_file.empty()) {
+            logging::AuditLog::instance().set_path(config_.audit_log_file);
+            LOG_INFO("Audit log: " + config_.audit_log_file);
         }
         
         // Initialize crypto if key is available
@@ -655,6 +739,101 @@ void Server::cleanup_threads() {
         worker_threads_.end());
 }
 
+void ConnectionHandler::handle_download_request(const protocol::DownloadRequest& request) {
+    protocol::DownloadResponse resp;
+    std::string native_path = common::convert_to_native_path(request.remote_path);
+    std::string resolved = file::FileManager::normalize_path(native_path);
+
+    if (!is_path_allowed(request.remote_path)) {
+        resp.success = false;
+        resp.error_message = "Access denied: " + request.remote_path;
+        resp.file_size = 0;
+        resp.is_directory = false;
+        send_message(resp);
+        return;
+    }
+
+    if (!file::FileManager::exists(resolved)) {
+        resp.success = false;
+        resp.error_message = "File not found: " + resolved;
+        resp.file_size = 0;
+        resp.is_directory = false;
+        send_message(resp);
+        return;
+    }
+
+    resp.is_directory = file::FileManager::is_directory(resolved);
+    resp.file_size = resp.is_directory ? 0 : file::FileManager::file_size(resolved);
+    resp.success = true;
+    send_message(resp);
+
+    if (!resp.is_directory) {
+        file::FileStream fs;
+        if (!fs.open_read(resolved)) {
+            return;
+        }
+        const size_t CHUNK = 1 * 1024 * 1024;
+        uint64_t offset = 0;
+        uint64_t file_size = resp.file_size;
+        while (offset < file_size) {
+            size_t to_read = static_cast<size_t>((std::min)(static_cast<uint64_t>(CHUNK), file_size - offset));
+            std::vector<uint8_t> buf(to_read);
+            size_t nr = fs.read(offset, buf.data(), to_read);
+            if (nr == 0) break;
+            buf.resize(nr);
+
+            protocol::FileData chunk_msg;
+            chunk_msg.offset = offset;
+            chunk_msg.uncompressed_size = nr;
+            chunk_msg.data = std::move(buf);
+            chunk_msg.compressed = false;
+            chunk_msg.is_last_chunk = (offset + nr >= file_size);
+            send_message(chunk_msg);
+
+            auto ack_msg = receive_message();
+            auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
+            if (!ack || !ack->success) {
+                LOG_ERROR("Download ACK failed");
+                break;
+            }
+            offset += nr;
+        }
+        fs.close();
+        LOG_INFO("Download completed: " + resolved + " (" + std::to_string(offset) + " bytes)");
+    }
+}
+
+void ConnectionHandler::handle_list_request(const protocol::ListRequest& request) {
+    protocol::ListResponse resp;
+    std::string native_path = common::convert_to_native_path(request.remote_path);
+    std::string resolved = file::FileManager::normalize_path(native_path);
+
+    if (!is_path_allowed(request.remote_path)) {
+        resp.success = false;
+        resp.error_message = "Access denied: " + request.remote_path;
+        send_message(resp);
+        return;
+    }
+
+    if (!file::FileManager::exists(resolved)) {
+        resp.success = false;
+        resp.error_message = "Path not found: " + resolved;
+        send_message(resp);
+        return;
+    }
+
+    resp.success = true;
+    auto entries = file::FileManager::list_directory(resolved, request.recursive);
+    for (const auto& e : entries) {
+        protocol::RemoteFileInfo info;
+        info.path = e.path;
+        info.size = e.size;
+        info.is_directory = e.is_directory;
+        info.last_modified = e.last_modified;
+        resp.entries.push_back(std::move(info));
+    }
+    send_message(resp);
+}
+
 } // namespace server
 } // namespace netcopy
-
