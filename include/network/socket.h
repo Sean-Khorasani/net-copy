@@ -61,6 +61,9 @@ public:
     bool is_valid() const;
     void close();
 
+    // Get remote peer address as "ip:port" string (only valid for accepted sockets)
+    std::string get_peer_address() const;
+
     // Get native handle
     socket_t native_handle() const { return socket_; }
 

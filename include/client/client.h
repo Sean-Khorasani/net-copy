@@ -127,6 +127,9 @@ public:
     // File transfer
     void transfer_file(const std::string& local_path, const std::string& remote_path, bool resume = false);
     void transfer_directory(const std::string& local_path, const std::string& remote_path, bool recursive = true, bool resume = false);
+    void download_file(const std::string& remote_path, const std::string& local_path);
+    void download_directory(const std::string& remote_path, const std::string& local_path, bool recursive = true);
+    std::vector<protocol::RemoteFileInfo> list_remote_directory(const std::string& remote_path, bool recursive = false);
     
     // Progress callback
     using ProgressCallback = std::function<void(uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file)>;

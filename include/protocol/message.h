@@ -24,7 +24,12 @@ enum class MessageType : uint32_t {
     ERROR_MESSAGE = 12,
     AUTH_CHALLENGE = 13,
     AUTH_RESPONSE = 14,
-    AUTH_RESULT = 15
+    AUTH_RESULT = 15,
+    DOWNLOAD_REQUEST = 16,
+    DOWNLOAD_RESPONSE = 17,
+    LIST_REQUEST = 18,
+    LIST_RESPONSE = 19,
+    DISCONNECT = 22
 };
 
 struct MessageHeader {
@@ -241,6 +246,67 @@ public:
     bool success;
     std::string error_message;
 private:
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+struct RemoteFileInfo {
+    std::string path;
+    uint64_t size;
+    bool is_directory;
+    uint64_t last_modified;
+};
+
+class DownloadRequest : public Message {
+public:
+    DownloadRequest();
+    
+    std::string remote_path;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class DownloadResponse : public Message {
+public:
+    DownloadResponse();
+    
+    bool success;
+    std::string error_message;
+    uint64_t file_size;
+    bool is_directory;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class ListRequest : public Message {
+public:
+    ListRequest();
+    
+    std::string remote_path;
+    bool recursive;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class ListResponse : public Message {
+public:
+    ListResponse();
+    
+    bool success;
+    std::string error_message;
+    std::vector<RemoteFileInfo> entries;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class Disconnect : public Message {
+public:
+    Disconnect();
+    
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
 };

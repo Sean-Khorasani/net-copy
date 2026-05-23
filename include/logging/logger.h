@@ -22,6 +22,7 @@ public:
     void set_level(LogLevel level);
     void set_file_output(const std::string& filename);
     void set_console_output(bool enable);
+    void set_json_format(bool enable);
     
     void log(LogLevel level, const std::string& message);
     void debug(const std::string& message);
@@ -40,6 +41,7 @@ private:
     LogLevel level_ = LogLevel::INFO;
     std::string log_file_;
     bool console_output_ = true;
+    bool json_format_ = false;
     std::mutex mutex_;
     
     std::string format_message(LogLevel level, const std::string& message);

@@ -68,10 +68,13 @@ struct ServerConfig {
     // Performance settings
     int max_bandwidth_percent;
     size_t max_chunk_size;
+    int socket_buffer_size;
     
     // Logging settings
     std::string log_level;
     std::string log_file;
+    std::string log_format;
+    std::string audit_log_file;
     bool console_output;
     
     // Daemon settings
@@ -104,10 +107,12 @@ struct ClientConfig {
     size_t max_chunk_size;
     double chunk_size_increase_factor; // New: default to 1.1
     double chunk_size_decrease_factor; // New: default to 0.5
+    int socket_buffer_size;
     
     // Logging settings
     std::string log_level;
     std::string log_file;
+    std::string log_format;
     bool console_output;
     
     // Connection settings
@@ -121,6 +126,7 @@ struct ClientConfig {
     // Auth settings
     std::string username;
     std::string password;
+    std::string password_encrypted;
     std::string auth_method;            // "none", "password", "mlkem"
     std::string private_key_file;       // path to .pem ML-KEM private key
     std::string private_key_passphrase; // passphrase to decrypt key file

@@ -43,11 +43,18 @@ private:
     // Auth state
     auth::UserDb user_db_;
     std::string authenticated_user_;
+    std::vector<uint8_t> session_shared_secret_;
+    std::vector<uint8_t> client_nonce_from_handshake_;
+    std::vector<uint8_t> server_nonce_from_handshake_;
+    int auth_failure_count_ = 0;
+    static constexpr int MAX_AUTH_FAILURES = 5;
     
     // Protocol handling
     void perform_handshake();
     void handle_file_request(const protocol::FileRequest& request);
     void handle_file_data(const protocol::FileData& data);
+    void handle_download_request(const protocol::DownloadRequest& request);
+    void handle_list_request(const protocol::ListRequest& request);
     
     // Message handling
     void send_message(const protocol::Message& message);
