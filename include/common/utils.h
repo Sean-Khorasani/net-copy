@@ -39,6 +39,11 @@ void sleep_milliseconds(int ms);
 // Security utilities
 std::vector<uint8_t> generate_random_bytes(size_t length);
 std::string get_password_from_console(const std::string& prompt);
+std::vector<uint8_t> derive_session_key(
+    const std::string& base_key_hex,
+    const std::vector<uint8_t>& session_secret,
+    const std::vector<uint8_t>& server_nonce,
+    const std::vector<uint8_t>& client_nonce);
 
 // Version information
 std::string get_version_string();

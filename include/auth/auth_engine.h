@@ -21,6 +21,7 @@ struct AuthChallengeData {
     crypto::MlKemLevel mlkem_level = crypto::MlKemLevel::MLKEM_768;
     // Internal (not sent to client):
     std::vector<uint8_t> expected_proof;  // pre-computed for verification
+    std::vector<uint8_t> kem_shared_secret; // ML-KEM shared secret for key derivation
 };
 
 class AuthEngine {

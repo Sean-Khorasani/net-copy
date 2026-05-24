@@ -69,6 +69,7 @@ public:
 
 private:
     socket_t socket_;
+    bool reuse_address_ = true;
     
     static void initialize_winsock();
     static void cleanup_winsock();

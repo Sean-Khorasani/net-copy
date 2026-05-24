@@ -134,6 +134,16 @@ public:
     // Progress callback
     using ProgressCallback = std::function<void(uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file)>;
     void set_progress_callback(ProgressCallback callback);
+    uint32_t get_negotiated_parallel_streams() const { return negotiated_parallel_streams_; }
+    void set_requested_parallel_streams(uint32_t count) { requested_parallel_streams_ = count; }
+    
+    enum class OverwriteDecision {
+        OVERWRITE,
+        SKIP,
+        CANCEL
+    };
+    using OverwriteCallback = std::function<OverwriteDecision(const std::string& remote_path, uint64_t remote_size)>;
+    void set_overwrite_callback(OverwriteCallback callback);
     
     // Error handling
     std::string get_last_error() const;
@@ -150,6 +160,7 @@ private:
     std::atomic<bool> connected_;
     std::string last_error_;
     ProgressCallback progress_callback_;
+    OverwriteCallback overwrite_callback_;
     uint32_t sequence_number_;
     crypto::SecurityLevel security_level_;
     crypto::SecurityLevel negotiated_security_level_;
@@ -182,13 +193,15 @@ private:
                          uint64_t total_size,
                          common::ChunkSizeManager& shared_chunk_manager,
                          common::BandwidthMonitor& shared_bandwidth_monitor,
-                         const std::function<void(uint64_t)>& progress_delta_callback);
+                         const std::function<void(uint64_t)>& progress_delta_callback,
+                         bool is_final_range = false);
     uint32_t choose_parallel_stream_count(uint64_t transfer_size) const;
     void send_file_request(const std::string& local_path,
                            const std::string& remote_path,
                            bool resume,
                            bool truncate_destination,
-                           uint64_t& resume_offset);
+                           uint64_t& resume_offset,
+                           uint64_t* remote_file_size = nullptr);
     
     // Directory management
     void create_empty_directory(const std::string& remote_path);
@@ -202,6 +215,8 @@ private:
     common::ChunkSizeManager chunk_size_manager_;
     common::BandwidthMonitor bandwidth_monitor_;
     std::shared_ptr<common::BandwidthLimiter> bandwidth_limiter_;
+    std::mutex workers_mutex_;
+    std::vector<Client*> active_workers_;
 };
 
 } // namespace client

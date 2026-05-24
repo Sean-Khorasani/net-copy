@@ -40,6 +40,10 @@ private:
     bool current_transfer_completed_;
     size_t negotiated_max_chunk_size_;
     file::FileStream current_file_stream_;
+    bool current_is_symlink_ = false;
+    std::string current_symlink_target_;
+    uint32_t current_permissions_ = 0;
+    uint64_t current_expected_file_size_ = 0;
     // Auth state
     auth::UserDb user_db_;
     std::string authenticated_user_;
@@ -55,6 +59,8 @@ private:
     void handle_file_data(const protocol::FileData& data);
     void handle_download_request(const protocol::DownloadRequest& request);
     void handle_list_request(const protocol::ListRequest& request);
+    void handle_file_verify_request(const protocol::FileVerifyRequest& request);
+    void handle_block_hashes_request(const protocol::BlockHashesRequest& request);
     
     // Message handling
     void send_message(const protocol::Message& message);
@@ -96,11 +102,16 @@ private:
     config::ServerConfig config_;
     std::shared_ptr<crypto::ChaCha20Poly1305> crypto_;
     std::atomic<bool> running_;
-    std::vector<std::thread> worker_threads_;
+    
+    struct WorkerThread {
+        std::thread thread;
+        std::shared_ptr<std::atomic<bool>> finished;
+    };
+    std::vector<WorkerThread> worker_threads_;
     
     void accept_connections();
     void handle_client(network::Socket client_socket);
-    void cleanup_threads();
+    void cleanup_threads(bool force_join_all = false);
 };
 
 } // namespace server

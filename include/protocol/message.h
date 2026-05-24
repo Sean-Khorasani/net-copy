@@ -29,7 +29,11 @@ enum class MessageType : uint32_t {
     DOWNLOAD_RESPONSE = 17,
     LIST_REQUEST = 18,
     LIST_RESPONSE = 19,
-    DISCONNECT = 22
+    FILE_VERIFY_REQUEST = 20,
+    FILE_VERIFY_RESPONSE = 21,
+    DISCONNECT = 22,
+    BLOCK_HASHES_REQUEST = 23,
+    BLOCK_HASHES_RESPONSE = 24
 };
 
 struct MessageHeader {
@@ -106,6 +110,12 @@ public:
     uint64_t resume_offset;
     bool auto_create_directories = true;
     bool truncate_destination = false;
+    
+    // Metadata fields
+    uint32_t permissions = 0;
+    bool is_symlink = false;
+    std::string symlink_target;
+    uint64_t file_size = 0;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -255,6 +265,11 @@ struct RemoteFileInfo {
     uint64_t size;
     bool is_directory;
     uint64_t last_modified;
+    
+    // Metadata fields
+    uint32_t permissions = 0;
+    bool is_symlink = false;
+    std::string symlink_target;
 };
 
 class DownloadRequest : public Message {
@@ -275,6 +290,11 @@ public:
     std::string error_message;
     uint64_t file_size;
     bool is_directory;
+    
+    // Metadata fields
+    uint32_t permissions = 0;
+    bool is_symlink = false;
+    std::string symlink_target;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -306,6 +326,58 @@ public:
 class Disconnect : public Message {
 public:
     Disconnect();
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class FileVerifyRequest : public Message {
+public:
+    FileVerifyRequest();
+    
+    std::string file_path;
+    std::vector<uint8_t> expected_hash;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class FileVerifyResponse : public Message {
+public:
+    FileVerifyResponse();
+    
+    bool success;
+    std::string error_message;
+    std::vector<uint8_t> actual_hash;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class BlockHashesRequest : public Message {
+public:
+    BlockHashesRequest();
+    
+    std::string file_path;
+    uint64_t block_size = 65536; // Default 64KB
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+struct BlockHashInfo {
+    uint64_t offset;
+    std::vector<uint8_t> hash;
+};
+
+class BlockHashesResponse : public Message {
+public:
+    BlockHashesResponse();
+    
+    bool success;
+    std::string error_message;
+    uint64_t block_size;
+    std::vector<BlockHashInfo> blocks;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;

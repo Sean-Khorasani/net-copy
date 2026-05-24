@@ -33,5 +33,17 @@ std::vector<uint8_t> base64_decode(const std::string& b64);
 // Generate cryptographically random bytes
 std::vector<uint8_t> random_bytes(size_t count);
 
+class Sha3Hasher {
+public:
+    Sha3Hasher();
+    void update(const uint8_t* data, size_t len);
+    void update(const std::vector<uint8_t>& data) { update(data.data(), data.size()); }
+    std::vector<uint8_t> finalize();
+private:
+    uint64_t state_[25];
+    uint8_t buffer_[136];
+    size_t buffer_len_;
+};
+
 } // namespace crypto
 } // namespace netcopy

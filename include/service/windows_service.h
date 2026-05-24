@@ -22,7 +22,7 @@ public:
 
     // Service control
     void run_service();
-    static void WINAPI service_main(DWORD argc, LPTSTR* argv);
+    static void WINAPI service_main(DWORD argc, LPWSTR* argv);
     static void WINAPI service_ctrl_handler(DWORD ctrl_code);
 
     // Process management

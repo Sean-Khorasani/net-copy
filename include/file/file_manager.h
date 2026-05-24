@@ -16,6 +16,16 @@ public:
         uint64_t size;
         bool is_directory;
         uint64_t last_modified;
+        
+        // Metadata fields
+        uint32_t permissions = 0;
+        bool is_symlink = false;
+        std::string symlink_target;
+    };
+
+    struct BlockHash {
+        uint64_t offset;
+        std::vector<uint8_t> hash;
     };
 
     // File operations
@@ -24,6 +34,11 @@ public:
     static bool is_regular_file(const std::string& path);
     static uint64_t file_size(const std::string& path);
     static uint64_t last_write_time(const std::string& path);
+    static uint32_t get_permissions(const std::string& path);
+    static void set_permissions(const std::string& path, uint32_t permissions);
+    static bool is_symlink(const std::string& path);
+    static std::string read_symlink(const std::string& path);
+    static bool create_symlink(const std::string& target, const std::string& symlink_path);
     
     // Directory operations
     static bool create_directories(const std::string& path);
@@ -33,6 +48,8 @@ public:
     static std::vector<uint8_t> read_file_chunk(const std::string& path, uint64_t offset, size_t chunk_size = 0);
     static void write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data, bool auto_create = true, bool truncate_on_zero = true);
     static void create_file(const std::string& path, uint64_t size = 0, bool auto_create = true);
+    static std::vector<uint8_t> compute_file_hash(const std::string& path);
+    static std::vector<BlockHash> compute_block_hashes(const std::string& path, uint64_t block_size);
     
     // Resume support
     static uint64_t get_partial_file_size(const std::string& path);
