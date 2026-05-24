@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 
 namespace netcopy {
 namespace auth {
@@ -117,7 +118,7 @@ UserDb UserDb::load(const std::string& path) {
     UserDb db;
     db.path_ = path;
 
-    std::ifstream f(path);
+    std::ifstream f(std::filesystem::u8path(path));
     if (!f) {
         // File doesn't exist yet - return empty db
         db.loaded_ = false;
@@ -177,7 +178,7 @@ UserDb UserDb::load(const std::string& path) {
 }
 
 void UserDb::save(const std::string& path) const {
-    std::ofstream f(path);
+    std::ofstream f(std::filesystem::u8path(path));
     if (!f) throw FileException("Cannot write user database: " + path);
 
     f << "# net_copy user database\n";

@@ -1,10 +1,12 @@
 #include "file/file_manager.h"
 #include "common/chunk_size_manager.h"
 #include "exceptions.h"
+#include "crypto/sha3.h"
 #include <algorithm>
 #include <regex>
 #include <vector>
 #include <cctype>
+#include <cwctype>
 #include <limits>
 #ifdef _WIN32
 #define NOMINMAX
@@ -18,20 +20,20 @@ namespace netcopy {
 namespace file {
 
 bool FileManager::exists(const std::string& path) {
-    return std::filesystem::exists(path);
+    return std::filesystem::exists(std::filesystem::u8path(path));
 }
 
 bool FileManager::is_directory(const std::string& path) {
-    return std::filesystem::is_directory(path);
+    return std::filesystem::is_directory(std::filesystem::u8path(path));
 }
 
 bool FileManager::is_regular_file(const std::string& path) {
-    return std::filesystem::is_regular_file(path);
+    return std::filesystem::is_regular_file(std::filesystem::u8path(path));
 }
 
 uint64_t FileManager::file_size(const std::string& path) {
     std::error_code ec;
-    auto size = std::filesystem::file_size(path, ec);
+    auto size = std::filesystem::file_size(std::filesystem::u8path(path), ec);
     if (ec) {
         throw FileException("Failed to get file size for " + path + ": " + ec.message());
     }
@@ -40,8 +42,12 @@ uint64_t FileManager::file_size(const std::string& path) {
 
 uint64_t FileManager::last_write_time(const std::string& path) {
     std::error_code ec;
-    auto time = std::filesystem::last_write_time(path, ec);
+    bool is_sym = std::filesystem::is_symlink(std::filesystem::u8path(path), ec);
+    auto time = std::filesystem::last_write_time(std::filesystem::u8path(path), ec);
     if (ec) {
+        if (is_sym) {
+            return 0;
+        }
         throw FileException("Failed to get last write time for " + path + ": " + ec.message());
     }
     
@@ -53,7 +59,7 @@ uint64_t FileManager::last_write_time(const std::string& path) {
 
 bool FileManager::create_directories(const std::string& path) {
     std::error_code ec;
-    return std::filesystem::create_directories(path, ec);
+    return std::filesystem::create_directories(std::filesystem::u8path(path), ec);
 }
 
 std::vector<FileManager::FileInfo> FileManager::list_directory(const std::string& path, bool recursive) {
@@ -61,34 +67,56 @@ std::vector<FileManager::FileInfo> FileManager::list_directory(const std::string
     
     try {
         if (recursive) {
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(path)) {
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(std::filesystem::u8path(path))) {
                 FileInfo info;
-                info.path = entry.path().string();
-                info.is_directory = entry.is_directory();
+                info.path = entry.path().u8string();
                 
-                if (!info.is_directory) {
-                    info.size = file_size(info.path);
+                std::error_code ec;
+                auto status = entry.symlink_status(ec);
+                info.is_symlink = std::filesystem::is_symlink(status);
+                if (info.is_symlink) {
+                    info.symlink_target = read_symlink(info.path);
+                    info.is_directory = false;
+                    info.size = 0;
                     info.last_modified = last_write_time(info.path);
                 } else {
-                    info.size = 0;
-                    info.last_modified = 0;
+                    info.is_directory = entry.is_directory();
+                    if (!info.is_directory) {
+                        info.size = file_size(info.path);
+                        info.last_modified = last_write_time(info.path);
+                    } else {
+                        info.size = 0;
+                        info.last_modified = 0;
+                    }
                 }
+                info.permissions = get_permissions(info.path);
                 
                 files.push_back(info);
             }
         } else {
-            for (const auto& entry : std::filesystem::directory_iterator(path)) {
+            for (const auto& entry : std::filesystem::directory_iterator(std::filesystem::u8path(path))) {
                 FileInfo info;
-                info.path = entry.path().string();
-                info.is_directory = entry.is_directory();
+                info.path = entry.path().u8string();
                 
-                if (!info.is_directory) {
-                    info.size = file_size(info.path);
+                std::error_code ec;
+                auto status = entry.symlink_status(ec);
+                info.is_symlink = std::filesystem::is_symlink(status);
+                if (info.is_symlink) {
+                    info.symlink_target = read_symlink(info.path);
+                    info.is_directory = false;
+                    info.size = 0;
                     info.last_modified = last_write_time(info.path);
                 } else {
-                    info.size = 0;
-                    info.last_modified = 0;
+                    info.is_directory = entry.is_directory();
+                    if (!info.is_directory) {
+                        info.size = file_size(info.path);
+                        info.last_modified = last_write_time(info.path);
+                    } else {
+                        info.size = 0;
+                        info.last_modified = 0;
+                    }
                 }
+                info.permissions = get_permissions(info.path);
                 
                 files.push_back(info);
             }
@@ -113,7 +141,7 @@ void FileManager::write_file_chunk(const std::string& path, uint64_t offset, con
 #ifdef _WIN32
     {
     DWORD disposition = (offset == 0 && truncate_on_zero) ? CREATE_ALWAYS : OPEN_ALWAYS;
-    HANDLE file_handle = CreateFileA(path.c_str(),
+    HANDLE file_handle = CreateFileW(std::filesystem::u8path(path).wstring().c_str(),
                                      GENERIC_WRITE,
                                      FILE_SHARE_READ,
                                      nullptr,
@@ -159,15 +187,15 @@ void FileManager::write_file_chunk(const std::string& path, uint64_t offset, con
         mode |= std::ios::trunc;
     }
     
-    std::fstream file(path, mode);
+    std::fstream file(std::filesystem::u8path(path), mode);
     if (!file) {
         // File doesn't exist, create it
-        file.open(path, std::ios::binary | std::ios::out);
+        file.open(std::filesystem::u8path(path), std::ios::binary | std::ios::out);
         if (!file) {
             throw FileException("Failed to create file: " + path);
         }
         file.close();
-        file.open(path, mode);
+        file.open(std::filesystem::u8path(path), mode);
     }
     
     file.seekp(offset);
@@ -187,7 +215,7 @@ void FileManager::create_file(const std::string& path, uint64_t size, bool auto_
         create_directories(dir);
     }
     
-    std::ofstream file(path, std::ios::binary);
+    std::ofstream file(std::filesystem::u8path(path), std::ios::binary);
     if (!file) {
         throw FileException("Failed to create file: " + path);
     }
@@ -213,42 +241,44 @@ bool FileManager::is_transfer_complete(const std::string& path, uint64_t expecte
 }
 
 std::string FileManager::normalize_path(const std::string& path) {
-    std::filesystem::path p(path);
-    return p.lexically_normal().string();
+    std::filesystem::path p = std::filesystem::u8path(path);
+    return p.lexically_normal().u8string();
 }
 
 std::string FileManager::get_filename(const std::string& path) {
-    std::filesystem::path p(path);
-    return p.filename().string();
+    std::filesystem::path p = std::filesystem::u8path(path);
+    std::string name = p.filename().u8string();
+    if (name.empty() && p.has_parent_path()) {
+        name = p.parent_path().filename().u8string();
+    }
+    return name;
 }
 
 std::string FileManager::get_directory(const std::string& path) {
-    std::filesystem::path p(path);
-    return p.parent_path().string();
+    std::filesystem::path p = std::filesystem::u8path(path);
+    return p.parent_path().u8string();
 }
 
 std::string FileManager::join_path(const std::string& base, const std::string& relative) {
-    std::filesystem::path p = std::filesystem::path(base) / relative;
-    return p.string();
+    std::filesystem::path p = std::filesystem::u8path(base) / std::filesystem::u8path(relative);
+    return p.u8string();
 }
 
 bool FileManager::is_path_safe(const std::string& path, const std::string& base_directory) {
     try {
-        std::filesystem::path normalized_path = std::filesystem::path(path).lexically_normal();
-        std::filesystem::path normalized_base = std::filesystem::path(base_directory).lexically_normal();
+        std::filesystem::path normalized_path = std::filesystem::u8path(path).lexically_normal();
+        std::filesystem::path normalized_base = std::filesystem::u8path(base_directory).lexically_normal();
         
         std::filesystem::path relative;
 
 #ifdef _WIN32
         // On Windows, paths are case-insensitive. We need to handle this for relative() to work as expected lexically.
-        std::string path_lower = normalized_path.string();
-        std::string base_lower = normalized_base.string();
-        std::transform(path_lower.begin(), path_lower.end(), path_lower.begin(), 
-                       [](unsigned char c){ return std::tolower(c); });
-        std::transform(base_lower.begin(), base_lower.end(), base_lower.begin(), 
-                       [](unsigned char c){ return std::tolower(c); });
+        std::wstring path_w = normalized_path.wstring();
+        std::wstring base_w = normalized_base.wstring();
+        std::transform(path_w.begin(), path_w.end(), path_w.begin(), ::towlower);
+        std::transform(base_w.begin(), base_w.end(), base_w.begin(), ::towlower);
         
-        relative = std::filesystem::relative(path_lower, base_lower);
+        relative = std::filesystem::relative(std::filesystem::path(path_w), std::filesystem::path(base_w));
 #else
         // Check if the path is within the base directory
         relative = std::filesystem::relative(normalized_path, normalized_base);
@@ -259,7 +289,13 @@ bool FileManager::is_path_safe(const std::string& path, const std::string& base_
             return true;
         }
         
-        return !relative.empty() && relative.native()[0] != '.';
+        // Check if the relative path starts with ".." (escapes base directory)
+        auto it = relative.begin();
+        if (it != relative.end() && *it == "..") {
+            return false;
+        }
+        
+        return !relative.empty();
     } catch (const std::filesystem::filesystem_error&) {
         return false;
     }
@@ -321,7 +357,7 @@ std::vector<uint8_t> FileManager::read_file_chunk(const std::string& path, uint6
 
 #ifdef _WIN32
     {
-    HANDLE file_handle = CreateFileA(path.c_str(),
+    HANDLE file_handle = CreateFileW(std::filesystem::u8path(path).wstring().c_str(),
                                      GENERIC_READ,
                                      FILE_SHARE_READ,
                                      nullptr,
@@ -360,7 +396,7 @@ std::vector<uint8_t> FileManager::read_file_chunk(const std::string& path, uint6
     }
 #endif
 
-    std::ifstream file(path, std::ios::binary);
+    std::ifstream file(std::filesystem::u8path(path), std::ios::binary);
     if (!file) {
         throw FileException("Failed to open file for reading: " + path);
     }
@@ -381,6 +417,125 @@ std::vector<uint8_t> FileManager::read_file_chunk(const std::string& path, uint6
     }
 
     return buffer;
+}
+
+std::vector<uint8_t> FileManager::compute_file_hash(const std::string& path) {
+    if (!exists(path)) {
+        throw FileException("File does not exist for hashing: " + path);
+    }
+    if (!is_regular_file(path)) {
+        throw FileException("Path is not a regular file: " + path);
+    }
+    
+    FileStream file;
+    if (!file.open_read(path)) {
+        throw FileException("Failed to open file for hashing: " + path);
+    }
+    
+    crypto::Sha3Hasher hasher;
+    std::vector<uint8_t> buffer(64 * 1024); // 64KB block size for hashing
+    uint64_t offset = 0;
+    while (true) {
+        size_t bytes_read = file.read(offset, buffer.data(), buffer.size());
+        if (bytes_read == 0) {
+            break;
+        }
+        hasher.update(buffer.data(), bytes_read);
+        offset += bytes_read;
+    }
+    file.close();
+    return hasher.finalize();
+}
+
+std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std::string& path, uint64_t block_size) {
+    if (!exists(path)) {
+        throw FileException("File does not exist for block hashing: " + path);
+    }
+    if (!is_regular_file(path)) {
+        throw FileException("Path is not a regular file: " + path);
+    }
+    
+    FileStream file;
+    if (!file.open_read(path)) {
+        throw FileException("Failed to open file for block hashing: " + path);
+    }
+    
+    std::vector<BlockHash> hashes;
+    std::vector<uint8_t> buffer(block_size);
+    uint64_t offset = 0;
+    while (true) {
+        size_t bytes_read = file.read(offset, buffer.data(), buffer.size());
+        if (bytes_read == 0) {
+            break;
+        }
+        
+        crypto::Sha3Hasher hasher;
+        hasher.update(buffer.data(), bytes_read);
+        
+        BlockHash bh;
+        bh.offset = offset;
+        bh.hash = hasher.finalize();
+        hashes.push_back(std::move(bh));
+        
+        offset += bytes_read;
+    }
+    file.close();
+    return hashes;
+}
+
+uint32_t FileManager::get_permissions(const std::string& path) {
+    std::error_code ec;
+    auto status = std::filesystem::symlink_status(std::filesystem::u8path(path), ec);
+    if (ec) {
+        return 0;
+    }
+    return static_cast<uint32_t>(status.permissions());
+}
+
+void FileManager::set_permissions(const std::string& path, uint32_t permissions) {
+    std::error_code ec;
+    std::filesystem::permissions(std::filesystem::u8path(path), static_cast<std::filesystem::perms>(permissions), ec);
+}
+
+bool FileManager::is_symlink(const std::string& path) {
+    std::error_code ec;
+    return std::filesystem::is_symlink(std::filesystem::u8path(path), ec);
+}
+
+std::string FileManager::read_symlink(const std::string& path) {
+    std::error_code ec;
+    auto target = std::filesystem::read_symlink(std::filesystem::u8path(path), ec);
+    if (ec) {
+        return "";
+    }
+    return target.u8string();
+}
+
+bool FileManager::create_symlink(const std::string& target, const std::string& symlink_path) {
+    std::error_code ec;
+    bool is_dir = false;
+    if (std::filesystem::exists(std::filesystem::u8path(target), ec)) {
+        is_dir = std::filesystem::is_directory(std::filesystem::u8path(target), ec);
+    }
+    
+    if (is_dir) {
+        std::filesystem::create_directory_symlink(std::filesystem::u8path(target), std::filesystem::u8path(symlink_path), ec);
+    } else {
+        std::filesystem::create_symlink(std::filesystem::u8path(target), std::filesystem::u8path(symlink_path), ec);
+    }
+    
+    if (ec) {
+        // Fallback: If symlink creation fails (e.g. privilege error), write a placeholder file
+        // containing the target path, so the transfer doesn't fail completely.
+        std::ofstream placeholder(std::filesystem::u8path(symlink_path));
+        if (placeholder.is_open()) {
+            placeholder << target;
+            placeholder.close();
+            return true;
+        }
+        return false;
+    }
+    return true;
 }
 
 // FileStream implementation
@@ -431,13 +586,30 @@ bool FileStream::open_read(const std::string& path) {
     close();
     path_ = path;
 #ifdef _WIN32
-    HANDLE handle = CreateFileA(path.c_str(),
-                                GENERIC_READ,
-                                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                nullptr,
-                                OPEN_EXISTING,
-                                FILE_ATTRIBUTE_NORMAL,
-                                nullptr);
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    int retry_count = 5;
+    int delay_ms = 100;
+    while (retry_count > 0) {
+        handle = CreateFileW(std::filesystem::u8path(path).wstring().c_str(),
+                             GENERIC_READ,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                             nullptr,
+                             OPEN_EXISTING,
+                             FILE_ATTRIBUTE_NORMAL,
+                             nullptr);
+        if (handle != INVALID_HANDLE_VALUE) {
+            break;
+        }
+        if (GetLastError() == ERROR_SHARING_VIOLATION) {
+            retry_count--;
+            if (retry_count > 0) {
+                Sleep(delay_ms);
+                delay_ms *= 2;
+                continue;
+            }
+        }
+        break;
+    }
     if (handle == INVALID_HANDLE_VALUE) {
         return false;
     }
@@ -465,13 +637,30 @@ bool FileStream::open_write(const std::string& path, bool truncate_on_zero, bool
     
 #ifdef _WIN32
     DWORD disposition = truncate_on_zero ? CREATE_ALWAYS : OPEN_ALWAYS;
-    HANDLE handle = CreateFileA(path.c_str(),
-                                GENERIC_WRITE,
-                                FILE_SHARE_READ | FILE_SHARE_WRITE,
-                                nullptr,
-                                disposition,
-                                FILE_ATTRIBUTE_NORMAL,
-                                nullptr);
+    HANDLE handle = INVALID_HANDLE_VALUE;
+    int retry_count = 5;
+    int delay_ms = 100;
+    while (retry_count > 0) {
+        handle = CreateFileW(std::filesystem::u8path(path).wstring().c_str(),
+                             GENERIC_WRITE,
+                             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                             nullptr,
+                             disposition,
+                             FILE_ATTRIBUTE_NORMAL,
+                             nullptr);
+        if (handle != INVALID_HANDLE_VALUE) {
+            break;
+        }
+        if (GetLastError() == ERROR_SHARING_VIOLATION) {
+            retry_count--;
+            if (retry_count > 0) {
+                Sleep(delay_ms);
+                delay_ms *= 2;
+                continue;
+            }
+        }
+        break;
+    }
     if (handle == INVALID_HANDLE_VALUE) {
         return false;
     }

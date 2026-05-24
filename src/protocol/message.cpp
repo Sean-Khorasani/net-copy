@@ -180,6 +180,18 @@ std::unique_ptr<Message> Message::deserialize(const std::vector<uint8_t>& data) 
         case MessageType::DISCONNECT:
             message = std::make_unique<Disconnect>();
             break;
+        case MessageType::FILE_VERIFY_REQUEST:
+            message = std::make_unique<FileVerifyRequest>();
+            break;
+        case MessageType::FILE_VERIFY_RESPONSE:
+            message = std::make_unique<FileVerifyResponse>();
+            break;
+        case MessageType::BLOCK_HASHES_REQUEST:
+            message = std::make_unique<BlockHashesRequest>();
+            break;
+        case MessageType::BLOCK_HASHES_RESPONSE:
+            message = std::make_unique<BlockHashesResponse>();
+            break;
         default:
             throw ProtocolException("Unknown message type");
     }
@@ -306,6 +318,14 @@ std::vector<uint8_t> FileRequest::serialize_payload() const {
     write_uint64(buffer, resume_offset);
     buffer.push_back(auto_create_directories ? 1 : 0);
     buffer.push_back(truncate_destination ? 1 : 0);
+    
+    // Phase 2 Metadata fields
+    write_uint32(buffer, permissions);
+    buffer.push_back(is_symlink ? 1 : 0);
+    write_string(buffer, symlink_target);
+    
+    // Phase 3 Delta sync fields
+    write_uint64(buffer, file_size);
     return buffer;
 }
 
@@ -325,6 +345,30 @@ void FileRequest::deserialize_payload(const std::vector<uint8_t>& data) {
         truncate_destination = data[offset++] != 0;
     } else {
         truncate_destination = false;
+    }
+    
+    // Phase 2 Metadata fields
+    if (offset < data.size()) {
+        permissions = read_uint32(data, offset);
+    } else {
+        permissions = 0;
+    }
+    if (offset < data.size()) {
+        is_symlink = data[offset++] != 0;
+    } else {
+        is_symlink = false;
+    }
+    if (offset < data.size()) {
+        symlink_target = read_string(data, offset);
+    } else {
+        symlink_target = "";
+    }
+    
+    // Phase 3 Delta sync fields
+    if (offset < data.size()) {
+        file_size = read_uint64(data, offset);
+    } else {
+        file_size = 0;
     }
 }
 
@@ -584,6 +628,11 @@ std::vector<uint8_t> DownloadResponse::serialize_payload() const {
     write_string(buffer, error_message);
     write_uint64(buffer, file_size);
     buffer.push_back(is_directory ? 1 : 0);
+    
+    // Phase 2 Metadata fields
+    write_uint32(buffer, permissions);
+    buffer.push_back(is_symlink ? 1 : 0);
+    write_string(buffer, symlink_target);
     return buffer;
 }
 
@@ -595,6 +644,23 @@ void DownloadResponse::deserialize_payload(const std::vector<uint8_t>& data) {
     file_size = read_uint64(data, offset);
     if (offset >= data.size()) throw ProtocolException("DownloadResponse: missing is_directory byte");
     is_directory = data[offset++] != 0;
+    
+    // Phase 2 Metadata fields
+    if (offset < data.size()) {
+        permissions = read_uint32(data, offset);
+    } else {
+        permissions = 0;
+    }
+    if (offset < data.size()) {
+        is_symlink = data[offset++] != 0;
+    } else {
+        is_symlink = false;
+    }
+    if (offset < data.size()) {
+        symlink_target = read_string(data, offset);
+    } else {
+        symlink_target = "";
+    }
 }
 
 // ListRequest implementation
@@ -631,6 +697,11 @@ std::vector<uint8_t> ListResponse::serialize_payload() const {
         write_uint64(buffer, e.size);
         buffer.push_back(e.is_directory ? 1 : 0);
         write_uint64(buffer, e.last_modified);
+        
+        // Phase 2 Metadata fields
+        write_uint32(buffer, e.permissions);
+        buffer.push_back(e.is_symlink ? 1 : 0);
+        write_string(buffer, e.symlink_target);
     }
     return buffer;
 }
@@ -649,6 +720,23 @@ void ListResponse::deserialize_payload(const std::vector<uint8_t>& data) {
         if (offset >= data.size()) throw ProtocolException("ListResponse: missing entry is_directory byte");
         info.is_directory = data[offset++] != 0;
         info.last_modified = read_uint64(data, offset);
+        
+        // Phase 2 Metadata fields
+        if (offset < data.size()) {
+            info.permissions = read_uint32(data, offset);
+        } else {
+            info.permissions = 0;
+        }
+        if (offset < data.size()) {
+            info.is_symlink = data[offset++] != 0;
+        } else {
+            info.is_symlink = false;
+        }
+        if (offset < data.size()) {
+            info.symlink_target = read_string(data, offset);
+        } else {
+            info.symlink_target = "";
+        }
         entries.push_back(info);
     }
 }
@@ -663,6 +751,106 @@ std::vector<uint8_t> Disconnect::serialize_payload() const {
 
 void Disconnect::deserialize_payload(const std::vector<uint8_t>& data) {
     // No payload
+}
+
+// FileVerifyRequest implementation
+FileVerifyRequest::FileVerifyRequest()
+    : Message(MessageType::FILE_VERIFY_REQUEST) {}
+
+std::vector<uint8_t> FileVerifyRequest::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    write_string(buffer, file_path);
+    write_bytes(buffer, expected_hash);
+    return buffer;
+}
+
+void FileVerifyRequest::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    file_path = read_string(data, offset);
+    expected_hash = read_bytes(data, offset);
+}
+
+// FileVerifyResponse implementation
+FileVerifyResponse::FileVerifyResponse()
+    : Message(MessageType::FILE_VERIFY_RESPONSE),
+      success(false) {}
+
+std::vector<uint8_t> FileVerifyResponse::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    buffer.push_back(success ? 1 : 0);
+    write_string(buffer, error_message);
+    write_bytes(buffer, actual_hash);
+    return buffer;
+}
+
+void FileVerifyResponse::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    if (offset >= data.size()) throw ProtocolException("FileVerifyResponse: missing success byte");
+    success = data[offset++] != 0;
+    error_message = read_string(data, offset);
+    actual_hash = read_bytes(data, offset);
+}
+
+// BlockHashesRequest implementation
+BlockHashesRequest::BlockHashesRequest()
+    : Message(MessageType::BLOCK_HASHES_REQUEST),
+      block_size(65536) {}
+
+std::vector<uint8_t> BlockHashesRequest::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    write_string(buffer, file_path);
+    write_uint64(buffer, block_size);
+    return buffer;
+}
+
+void BlockHashesRequest::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    file_path = read_string(data, offset);
+    if (offset < data.size()) {
+        block_size = read_uint64(data, offset);
+    } else {
+        block_size = 65536;
+    }
+}
+
+// BlockHashesResponse implementation
+BlockHashesResponse::BlockHashesResponse()
+    : Message(MessageType::BLOCK_HASHES_RESPONSE),
+      success(false),
+      block_size(65536) {}
+
+std::vector<uint8_t> BlockHashesResponse::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    buffer.push_back(success ? 1 : 0);
+    write_string(buffer, error_message);
+    write_uint64(buffer, block_size);
+    write_uint32(buffer, static_cast<uint32_t>(blocks.size()));
+    for (const auto& b : blocks) {
+        write_uint64(buffer, b.offset);
+        write_bytes(buffer, b.hash);
+    }
+    return buffer;
+}
+
+void BlockHashesResponse::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    if (offset >= data.size()) throw ProtocolException("BlockHashesResponse: missing success byte");
+    success = data[offset++] != 0;
+    error_message = read_string(data, offset);
+    if (offset < data.size()) {
+        block_size = read_uint64(data, offset);
+        uint32_t size = read_uint32(data, offset);
+        blocks.clear();
+        for (uint32_t i = 0; i < size; ++i) {
+            BlockHashInfo info;
+            info.offset = read_uint64(data, offset);
+            info.hash = read_bytes(data, offset);
+            blocks.push_back(info);
+        }
+    } else {
+        block_size = 65536;
+        blocks.clear();
+    }
 }
 
 } // namespace protocol

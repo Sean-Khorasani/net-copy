@@ -69,44 +69,74 @@ Socket& Socket::operator=(Socket&& other) noexcept {
     return *this;
 }
 
+static int get_socket_family(socket_t sock) {
+    sockaddr_storage addr{};
+    socklen_t len = sizeof(addr);
+    if (getsockname(sock, reinterpret_cast<sockaddr*>(&addr), &len) == 0) {
+        return addr.ss_family;
+    }
+    return AF_INET;
+}
+
 void Socket::bind(const std::string& address, uint16_t port) {
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
+    std::string addr_str = address;
+    if (addr_str.empty() || addr_str == "0.0.0.0") {
+        addr_str = "::"; // Default to dual-stack IPv6 any address
+    }
     
-    if (address == "0.0.0.0" || address.empty()) {
-        addr.sin_addr.s_addr = INADDR_ANY;
-    } else {
+    struct addrinfo hints{};
+    hints.ai_family = AF_UNSPEC; // Accept both IPv4 and IPv6
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    hints.ai_flags = AI_PASSIVE; // For binding
+    
+    struct addrinfo* result = nullptr;
+    std::string port_str = std::to_string(port);
+    int status = getaddrinfo(addr_str.c_str(), port_str.c_str(), &hints, &result);
+    if (status != 0) {
+        throw NetworkException("getaddrinfo failed: " + std::string(gai_strerror(status)));
+    }
+    
+    struct addrinfo* rp = nullptr;
+    bool bound = false;
+    std::string last_error_msg;
+    
+    for (rp = result; rp != nullptr; rp = rp->ai_next) {
+        if (socket_ == INVALID_SOCKET_VALUE || rp->ai_family != get_socket_family(socket_)) {
+            close();
+            socket_ = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+            if (socket_ == INVALID_SOCKET_VALUE) {
+                continue;
+            }
+            
+            if (rp->ai_family == AF_INET6) {
+                int opt = 0;
 #ifdef _WIN32
-        // Use inet_addr on Windows (universally available)
-        addr.sin_addr.s_addr = inet_addr(address.c_str());
-        if (addr.sin_addr.s_addr == INADDR_NONE) {
-            throw NetworkException("Invalid address: " + address);
-        }
+                setsockopt(socket_, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&opt), sizeof(opt));
 #else
-        if (inet_pton(AF_INET, address.c_str(), &addr.sin_addr) <= 0) {
-            throw NetworkException("Invalid address: " + address);
+                setsockopt(socket_, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt));
+#endif
+            }
         }
+        
+        set_reuse_address(reuse_address_);
+        
+        if (::bind(socket_, rp->ai_addr, static_cast<int>(rp->ai_addrlen)) != SOCKET_ERROR_VALUE) {
+            bound = true;
+            break;
+        }
+        
+#ifdef _WIN32
+        last_error_msg = "Windows error " + std::to_string(WSAGetLastError());
+#else
+        last_error_msg = std::strerror(errno);
 #endif
     }
     
-    if (::bind(socket_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR_VALUE) {
-#ifdef _WIN32
-        int error = WSAGetLastError();
-        if (error == WSAEADDRINUSE) {
-            throw NetworkException("Address already in use: " + address + ":" + std::to_string(port) + 
-                                 ". Another process is already listening on this port. Try stopping the other process or use a different port.");
-        }
-        throw NetworkException("Failed to bind socket to " + address + ":" + std::to_string(port) + 
-                             " (Windows error: " + std::to_string(error) + ")");
-#else
-        if (errno == EADDRINUSE) {
-            throw NetworkException("Address already in use: " + address + ":" + std::to_string(port) + 
-                                 ". Another process is already listening on this port. Try stopping the other process or use a different port.");
-        }
-        throw NetworkException("Failed to bind socket to " + address + ":" + std::to_string(port) + 
-                             " (errno: " + std::to_string(errno) + ")");
-#endif
+    freeaddrinfo(result);
+    
+    if (!bound) {
+        throw NetworkException("Failed to bind socket to " + address + ":" + std::to_string(port) + " (" + last_error_msg + ")");
     }
 }
 
@@ -117,7 +147,7 @@ void Socket::listen(int backlog) {
 }
 
 Socket Socket::accept() {
-    sockaddr_in client_addr{};
+    sockaddr_storage client_addr{};
     socklen_t addr_len = sizeof(client_addr);
     
     socket_t client_socket = ::accept(socket_, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
@@ -129,24 +159,47 @@ Socket Socket::accept() {
 }
 
 void Socket::connect(const std::string& address, uint16_t port) {
-    sockaddr_in addr{};
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
+    struct addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
     
+    struct addrinfo* result = nullptr;
+    std::string port_str = std::to_string(port);
+    int status = getaddrinfo(address.c_str(), port_str.c_str(), &hints, &result);
+    if (status != 0) {
+        throw NetworkException("getaddrinfo failed for " + address + ": " + std::string(gai_strerror(status)));
+    }
+    
+    struct addrinfo* rp = nullptr;
+    bool connected = false;
+    std::string last_error_msg;
+    
+    for (rp = result; rp != nullptr; rp = rp->ai_next) {
+        if (socket_ == INVALID_SOCKET_VALUE || rp->ai_family != get_socket_family(socket_)) {
+            close();
+            socket_ = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+            if (socket_ == INVALID_SOCKET_VALUE) {
+                continue;
+            }
+        }
+        
+        if (::connect(socket_, rp->ai_addr, static_cast<int>(rp->ai_addrlen)) != SOCKET_ERROR_VALUE) {
+            connected = true;
+            break;
+        }
+        
 #ifdef _WIN32
-    // Use inet_addr on Windows (universally available)
-    addr.sin_addr.s_addr = inet_addr(address.c_str());
-    if (addr.sin_addr.s_addr == INADDR_NONE) {
-        throw NetworkException("Invalid address: " + address);
-    }
+        last_error_msg = "Windows error " + std::to_string(WSAGetLastError());
 #else
-    if (inet_pton(AF_INET, address.c_str(), &addr.sin_addr) <= 0) {
-        throw NetworkException("Invalid address: " + address);
-    }
+        last_error_msg = std::strerror(errno);
 #endif
+    }
     
-    if (::connect(socket_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == SOCKET_ERROR_VALUE) {
-        throw NetworkException("Failed to connect to " + address + ":" + std::to_string(port));
+    freeaddrinfo(result);
+    
+    if (!connected) {
+        throw NetworkException("Failed to connect to " + address + ":" + std::to_string(port) + " (" + last_error_msg + ")");
     }
 }
 
@@ -172,16 +225,28 @@ size_t Socket::receive(void* buffer, size_t length) {
 }
 
 void Socket::set_reuse_address(bool enable) {
+    reuse_address_ = enable;
+    if (socket_ == INVALID_SOCKET_VALUE) {
+        return;
+    }
 #ifdef _WIN32
     // On Windows, use SO_EXCLUSIVEADDRUSE to prevent multiple binds to same port
     // This ensures proper "address already in use" errors
     if (enable) {
+        // Disable exclusive address use first to prevent mutual exclusivity failures
+        int opt_val = 0;
+        setsockopt(socket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&opt_val), sizeof(opt_val));
+        
         int option = 1;
         if (setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR, 
                        reinterpret_cast<const char*>(&option), sizeof(option)) == SOCKET_ERROR_VALUE) {
             throw NetworkException("Failed to set SO_REUSEADDR");
         }
     } else {
+        // Disable reuse address first
+        int opt_val = 0;
+        setsockopt(socket_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt_val), sizeof(opt_val));
+        
         int option = 1;
         if (setsockopt(socket_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, 
                        reinterpret_cast<const char*>(&option), sizeof(option)) == SOCKET_ERROR_VALUE) {
@@ -280,20 +345,22 @@ void Socket::close() {
 }
 
 std::string Socket::get_peer_address() const {
-    sockaddr_in addr{};
+    sockaddr_storage addr{};
     socklen_t addr_len = sizeof(addr);
     if (::getpeername(socket_, reinterpret_cast<sockaddr*>(&addr), &addr_len) == 0) {
-        char ip_str[INET_ADDRSTRLEN] = {};
-#ifdef _WIN32
-        // On Windows, use inet_ntoa (universally available)
-        const char* result = inet_ntoa(addr.sin_addr);
-        if (result) {
-            std::snprintf(ip_str, sizeof(ip_str), "%s", result);
+        char host[NI_MAXHOST] = {};
+        char serv[NI_MAXSERV] = {};
+        int res = getnameinfo(reinterpret_cast<const sockaddr*>(&addr), addr_len,
+                              host, sizeof(host),
+                              serv, sizeof(serv),
+                              NI_NUMERICHOST | NI_NUMERICSERV);
+        if (res == 0) {
+            std::string host_str(host);
+            if (addr.ss_family == AF_INET6) {
+                return "[" + host_str + "]:" + std::string(serv);
+            }
+            return host_str + ":" + std::string(serv);
         }
-#else
-        inet_ntop(AF_INET, &addr.sin_addr, ip_str, sizeof(ip_str));
-#endif
-        return std::string(ip_str) + ":" + std::to_string(ntohs(addr.sin_port));
     }
     return "unknown";
 }

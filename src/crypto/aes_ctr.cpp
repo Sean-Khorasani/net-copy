@@ -264,13 +264,13 @@ std::string AesCtr::get_detailed_acceleration_info() {
 #endif
 
     // Compiler support
-#if defined(__AES__)
+#if defined(__AES__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
     info += "Compiler AES Support: YES (AES-NI instructions available)\n";
 #else
     info += "Compiler AES Support: NO (AES-NI instructions not compiled in)\n";
 #endif
 
-#if defined(__SSE2__)
+#if defined(__SSE2__) || defined(_M_X64) || (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
     info += "Compiler SSE2 Support: YES\n";
 #else
     info += "Compiler SSE2 Support: NO\n";
@@ -364,7 +364,7 @@ void AesCtr::encrypt_block_software(const uint8_t* plaintext, uint8_t* ciphertex
 }
 
 void AesCtr::encrypt_block_aes_ni(const uint8_t* plaintext, uint8_t* ciphertext) {
-#if defined(__AES__) || defined(__PCLMUL__)
+#if defined(__AES__) || defined(__PCLMUL__) || (defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86)))
     // AES-NI is available at compile time
     __m128i block = _mm_loadu_si128(reinterpret_cast<const __m128i*>(plaintext));
     __m128i key = _mm_loadu_si128(reinterpret_cast<const __m128i*>(expanded_key_.data()));

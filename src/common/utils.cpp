@@ -1,4 +1,5 @@
 #include "common/utils.h"
+#include "crypto/sha3.h"
 #include <sstream>
 #include <iomanip>
 #include <random>
@@ -48,9 +49,9 @@ std::vector<uint8_t> from_hex_string(const std::string& hex_str) {
 
 std::string get_executable_path() {
 #ifdef _WIN32
-    char path[MAX_PATH];
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    return std::string(path);
+    wchar_t path[MAX_PATH];
+    GetModuleFileNameW(NULL, path, MAX_PATH);
+    return std::filesystem::path(path).u8string();
 #else
     char path[1024];
     ssize_t len = readlink("/proc/self/exe", path, sizeof(path) - 1);
@@ -217,7 +218,7 @@ std::string get_password_from_console(const std::string& prompt) {
 }
 
 std::string get_version_string() {
-    return "NetCopy v1.0.0";
+    return "NetCopy v0.81.2605.5";
 }
 
 std::string get_build_info() {
@@ -246,6 +247,14 @@ std::string convert_to_native_path(const std::string& path) {
 #ifdef _WIN32
     // Convert forward slashes to backslashes on Windows
     std::replace(result.begin(), result.end(), '/', '\\');
+    
+    // Strip leading slash/backslash if followed by a drive letter (e.g. \C: -> C:)
+    if (result.length() >= 3 && 
+        (result[0] == '\\' || result[0] == '/') && 
+        result[2] == ':' && 
+        std::isalpha(static_cast<unsigned char>(result[1]))) {
+        result = result.substr(1);
+    }
 #else
     // Convert backslashes to forward slashes on Unix-like systems
     std::replace(result.begin(), result.end(), '\\', '/');
@@ -319,6 +328,25 @@ std::string join_paths(const std::string& base, const std::string& relative) {
     
     result += clean_relative;
     return convert_to_native_path(result);
+}
+
+std::vector<uint8_t> derive_session_key(
+    const std::string& base_key_hex,
+    const std::vector<uint8_t>& session_secret,
+    const std::vector<uint8_t>& server_nonce,
+    const std::vector<uint8_t>& client_nonce)
+{
+    std::string hex = base_key_hex;
+    if (hex.size() > 2 && hex.substr(0, 2) == "0x") hex = hex.substr(2);
+    auto base_key = from_hex_string(hex);
+
+    std::vector<uint8_t> material;
+    material.insert(material.end(), base_key.begin(), base_key.end());
+    material.insert(material.end(), session_secret.begin(), session_secret.end());
+    material.insert(material.end(), server_nonce.begin(), server_nonce.end());
+    material.insert(material.end(), client_nonce.begin(), client_nonce.end());
+
+    return crypto::sha3_256(material);
 }
 
 } // namespace common

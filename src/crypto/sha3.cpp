@@ -371,5 +371,75 @@ std::vector<uint8_t> random_bytes(size_t count) {
     return buf;
 }
 
+Sha3Hasher::Sha3Hasher() : buffer_len_(0) {
+    std::memset(state_, 0, sizeof(state_));
+    std::memset(buffer_, 0, sizeof(buffer_));
+}
+
+void Sha3Hasher::update(const uint8_t* data, size_t len) {
+    size_t offset = 0;
+    
+    if (buffer_len_ > 0) {
+        size_t to_copy = (std::min)(len, size_t(136) - buffer_len_);
+        std::memcpy(buffer_ + buffer_len_, data, to_copy);
+        buffer_len_ += to_copy;
+        offset += to_copy;
+        
+        if (buffer_len_ == 136) {
+            for (size_t i = 0; i < 17; ++i) {
+                uint64_t lane = 0;
+                for (int b = 0; b < 8; ++b) {
+                    lane |= static_cast<uint64_t>(buffer_[i*8 + b]) << (b * 8);
+                }
+                state_[i] ^= lane;
+            }
+            keccak_f1600(state_);
+            buffer_len_ = 0;
+        }
+    }
+    
+    while (offset + 136 <= len) {
+        for (size_t i = 0; i < 17; ++i) {
+            uint64_t lane = 0;
+            for (int b = 0; b < 8; ++b) {
+                lane |= static_cast<uint64_t>(data[offset + i*8 + b]) << (b * 8);
+            }
+            state_[i] ^= lane;
+        }
+        keccak_f1600(state_);
+        offset += 136;
+    }
+    
+    if (offset < len) {
+        size_t remaining = len - offset;
+        std::memcpy(buffer_ + buffer_len_, data + offset, remaining);
+        buffer_len_ += remaining;
+    }
+}
+
+std::vector<uint8_t> Sha3Hasher::finalize() {
+    uint8_t last_block[136] = {};
+    std::memcpy(last_block, buffer_, buffer_len_);
+    last_block[buffer_len_] = 0x06;
+    last_block[135] |= 0x80;
+    
+    for (size_t i = 0; i < 17; ++i) {
+        uint64_t lane = 0;
+        for (int b = 0; b < 8; ++b) {
+            lane |= static_cast<uint64_t>(last_block[i*8 + b]) << (b * 8);
+        }
+        state_[i] ^= lane;
+    }
+    keccak_f1600(state_);
+    
+    std::vector<uint8_t> digest(32);
+    for (size_t i = 0; i < 4; ++i) {
+        for (int b = 0; b < 8; ++b) {
+            digest[i*8 + b] = static_cast<uint8_t>((state_[i] >> (b * 8)) & 0xFF);
+        }
+    }
+    return digest;
+}
+
 } // namespace crypto
 } // namespace netcopy

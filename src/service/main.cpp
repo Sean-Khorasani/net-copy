@@ -35,11 +35,16 @@ std::string get_service_executable_path() {
     return std::string(path);
 }
 
-int main(int argc, char* argv[]) {
+int service_main_entry(int argc, char* argv[]) {
     const std::string SERVICE_NAME = "NetCopyServer";
     const std::string DISPLAY_NAME = "NetCopy File Transfer Server";
     
     netcopy::service::WindowsService service(SERVICE_NAME, DISPLAY_NAME);
+    
+    if (argc >= 2 && std::string(argv[1]) == "--version") {
+        std::cout << netcopy::common::get_version_string() << std::endl;
+        return 0;
+    }
     
     if (argc < 2) {
         print_usage(argv[0]);
@@ -122,8 +127,37 @@ int main(int argc, char* argv[]) {
     return 0;
 }
 
+#ifdef _WIN32
+int wmain(int argc, wchar_t* argv[]) {
+    // Enable UTF-8 console output
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
+    std::vector<std::string> utf8_args_storage;
+    std::vector<char*> utf8_argv;
+    utf8_args_storage.reserve(argc);
+    utf8_argv.reserve(argc);
+    for (int i = 0; i < argc; ++i) {
+        utf8_args_storage.push_back(std::filesystem::path(argv[i]).u8string());
+    }
+    for (int i = 0; i < argc; ++i) {
+        utf8_argv.push_back(const_cast<char*>(utf8_args_storage[i].c_str()));
+    }
+    return service_main_entry(argc, utf8_argv.data());
+}
 #else
-int main() {
+int main(int argc, char* argv[]) {
+    return service_main_entry(argc, argv);
+}
+#endif
+
+#else
+#include "common/utils.h"
+int main(int argc, char* argv[]) {
+    if (argc >= 2 && std::string(argv[1]) == "--version") {
+        std::cout << netcopy::common::get_version_string() << std::endl;
+        return 0;
+    }
     std::cout << "Windows service functionality is only available on Windows." << std::endl;
     return 1;
 }

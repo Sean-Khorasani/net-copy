@@ -6,6 +6,7 @@
 #include "crypto/key_manager.h"
 #include "crypto/aes_ctr.h"
 #include "client/client.h"
+#include "common/utils.h"
 #include "exceptions.h"
 #include <iomanip>
 
@@ -557,6 +558,11 @@ Usage:
 // ============================================================
 
 int main(int argc, char* argv[]) {
+    if (argc >= 2 && std::string(argv[1]) == "--version") {
+        std::cout << netcopy::common::get_version_string() << std::endl;
+        return 0;
+    }
+
     if (argc < 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h") {
         print_usage();
         return 0;

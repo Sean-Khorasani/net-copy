@@ -27,6 +27,7 @@
 #include <fstream>
 #include <iostream>
 #include <cstdlib>
+#include <filesystem>
 
 namespace netcopy {
 namespace daemon {
@@ -110,7 +111,7 @@ void Daemon::create_pid_file(const std::string& pid_file) {
         throw NetCopyException("Another instance is already running");
     }
     
-    std::ofstream file(pid_file);
+    std::ofstream file(std::filesystem::u8path(pid_file));
     if (!file) {
         throw NetCopyException("Failed to create PID file: " + pid_file);
     }
@@ -120,7 +121,8 @@ void Daemon::create_pid_file(const std::string& pid_file) {
 }
 
 void Daemon::remove_pid_file(const std::string& pid_file) {
-    if (std::remove(pid_file.c_str()) == 0) {
+    std::error_code ec;
+    if (std::filesystem::remove(std::filesystem::u8path(pid_file), ec)) {
         LOG_INFO("Removed PID file: " + pid_file);
     } else {
         LOG_WARNING("Failed to remove PID file: " + pid_file);
@@ -128,7 +130,7 @@ void Daemon::remove_pid_file(const std::string& pid_file) {
 }
 
 bool Daemon::is_running(const std::string& pid_file) {
-    std::ifstream file(pid_file);
+    std::ifstream file(std::filesystem::u8path(pid_file));
     if (!file) {
         return false; // PID file doesn't exist
     }

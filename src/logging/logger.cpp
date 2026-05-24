@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sstream>
 #include <algorithm>
+#include <filesystem>
 
 namespace netcopy {
 namespace logging {
@@ -52,7 +53,7 @@ void Logger::log(LogLevel level, const std::string& message) {
     }
     
     if (!log_file_.empty()) {
-        std::ofstream file(log_file_, std::ios::app);
+        std::ofstream file(std::filesystem::u8path(log_file_), std::ios::app);
         if (file) {
             file << formatted_message << std::endl;
         }

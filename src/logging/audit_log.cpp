@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <sstream>
 #include <iostream>
+#include <filesystem>
 
 namespace netcopy {
 namespace logging {
@@ -25,7 +26,7 @@ void AuditLog::set_path(const std::string& path) {
     if (stream_.is_open()) {
         stream_.close();
     }
-    stream_.open(path_, std::ios::app);
+    stream_.open(std::filesystem::u8path(path_), std::ios::app);
 }
 
 void AuditLog::log_connect(const std::string& user, const std::string& client_address, bool success) {

@@ -8,6 +8,9 @@
 #include <filesystem> // Added for std::filesystem
 #include <vector> // Added for std::vector
 #include <cstring> // Added for strcmp
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 void print_usage(const char* program_name) {
     std::cout << "NetCopy Server - Secure File Transfer" << std::endl;
@@ -54,18 +57,39 @@ struct CommandLineArgs {
     bool auto_create_specified = false;
     bool verbose = false;
     bool help = false;
+    bool version = false;
 };
 
 bool parse_listen_address(const std::string& listen_arg, std::string& address, uint16_t& port) {
-    size_t colon_pos = listen_arg.find(':');
-    if (colon_pos == std::string::npos) {
-        std::cerr << "Error: Invalid listen address format. Expected: address:port" << std::endl;
-        std::cerr << "Examples: 127.0.0.1:1245, 0.0.0.0:1245, 192.168.1.100:8080" << std::endl;
+    if (listen_arg.empty()) {
+        std::cerr << "Error: Empty listen argument" << std::endl;
         return false;
     }
-    
-    address = listen_arg.substr(0, colon_pos);
-    std::string port_str = listen_arg.substr(colon_pos + 1);
+
+    std::string port_str;
+    if (listen_arg.front() == '[') {
+        size_t close_bracket = listen_arg.find(']');
+        if (close_bracket == std::string::npos) {
+            std::cerr << "Error: Invalid bracketed IPv6 address format. Expected: [address]:port" << std::endl;
+            return false;
+        }
+        address = listen_arg.substr(1, close_bracket - 1);
+        size_t colon_pos = listen_arg.find(':', close_bracket);
+        if (colon_pos == std::string::npos || colon_pos != close_bracket + 1) {
+            std::cerr << "Error: Invalid port separator after bracket. Expected [address]:port" << std::endl;
+            return false;
+        }
+        port_str = listen_arg.substr(colon_pos + 1);
+    } else {
+        size_t colon_pos = listen_arg.rfind(':');
+        if (colon_pos == std::string::npos) {
+            std::cerr << "Error: Invalid listen address format. Expected: address:port" << std::endl;
+            std::cerr << "Examples: 127.0.0.1:1245, [::1]:1245, 0.0.0.0:1245" << std::endl;
+            return false;
+        }
+        address = listen_arg.substr(0, colon_pos);
+        port_str = listen_arg.substr(colon_pos + 1);
+    }
     
     if (address.empty()) {
         std::cerr << "Error: Empty address in listen argument" << std::endl;
@@ -99,6 +123,9 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
         
         if (arg == "-h" || arg == "--help") {
             args.help = true;
+            return args;
+        } else if (arg == "--version") {
+            args.version = true;
             return args;
         } else if (arg == "-l" || arg == "--listen") {
             if (i + 1 < argc) {
@@ -144,6 +171,11 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
 int server_main(int argc, char* argv[]) {
     try {
         auto args = parse_arguments(argc, argv);
+        
+        if (args.version) {
+            std::cout << netcopy::common::get_version_string() << std::endl;
+            return 0;
+        }
         
         if (args.help) {
             print_usage(argv[0]);
@@ -238,6 +270,26 @@ int server_main(int argc, char* argv[]) {
     return 0;
 }
 
+#ifdef _WIN32
+int wmain(int argc, wchar_t* argv[]) {
+    // Enable UTF-8 console output
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
+    std::vector<std::string> utf8_args_storage;
+    std::vector<char*> utf8_argv;
+    utf8_args_storage.reserve(argc);
+    utf8_argv.reserve(argc);
+    for (int i = 0; i < argc; ++i) {
+        utf8_args_storage.push_back(std::filesystem::path(argv[i]).u8string());
+    }
+    for (int i = 0; i < argc; ++i) {
+        utf8_argv.push_back(const_cast<char*>(utf8_args_storage[i].c_str()));
+    }
+    return server_main(argc, utf8_argv.data());
+}
+#else
 int main(int argc, char* argv[]) {
     return server_main(argc, argv);
 }
+#endif

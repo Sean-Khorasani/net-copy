@@ -4,13 +4,14 @@
 #include <fstream>
 #include <sstream>
 #include <algorithm>
+#include <filesystem>
 #include <cstdint> // Added for uint64_t
 
 namespace netcopy {
 namespace config {
 
 void ConfigParser::load_from_file(const std::string& filename) {
-    std::ifstream file(filename);
+    std::ifstream file(std::filesystem::u8path(filename));
     if (!file) {
         throw ConfigException("Failed to open config file: " + filename);
     }
@@ -140,7 +141,7 @@ void ConfigParser::set_bool(const std::string& section, const std::string& key, 
 }
 
 void ConfigParser::save_to_file(const std::string& filename) const {
-    std::ofstream file(filename);
+    std::ofstream file(std::filesystem::u8path(filename));
     if (!file) {
         throw ConfigException("Failed to open config file for writing: " + filename);
     }
@@ -230,7 +231,7 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
     
     config.secret_key = parser.get_string("security", "secret_key", "");
     config.require_auth = parser.get_bool("security", "require_auth", true);
-    config.max_file_size = parser.get_uint64("security", "max_file_size", 1073741824);
+    config.max_file_size = parser.get_uint64("security", "max_file_size", 0);
     
     config.max_bandwidth_percent = parser.get_int("performance", "max_bandwidth_percent", 0);
     config.max_chunk_size = static_cast<size_t>(parser.get_int("performance", "max_chunk_size", 10485760));
@@ -267,7 +268,7 @@ ServerConfig ServerConfig::get_default() {
     
     config.secret_key = "";
     config.require_auth = true;
-    config.max_file_size = 1073741824;
+    config.max_file_size = 0;
     
     config.max_bandwidth_percent = 0;
     config.max_chunk_size = 10485760;

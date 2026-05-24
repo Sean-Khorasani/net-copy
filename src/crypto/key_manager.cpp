@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <cstring>
 #include <algorithm>
+#include <filesystem>
 
 namespace netcopy {
 namespace crypto {
@@ -120,7 +121,7 @@ void save_public_key(const std::string& path,
                      const std::vector<uint8_t>& key,
                      MlKemLevel level) {
     std::string level_str = MlKem::level_to_string(level);
-    std::ofstream f(path);
+    std::ofstream f(std::filesystem::u8path(path));
     if (!f) throw FileException("Cannot write public key: " + path);
 
     f << make_begin_marker(level_str, false, true) << "\n";
@@ -133,7 +134,7 @@ void save_private_key(const std::string& path,
                       MlKemLevel level,
                       const std::string& passphrase) {
     std::string level_str = MlKem::level_to_string(level);
-    std::ofstream f(path);
+    std::ofstream f(std::filesystem::u8path(path));
     if (!f) throw FileException("Cannot write private key: " + path);
 
     if (passphrase.empty()) {
@@ -160,7 +161,7 @@ void save_private_key(const std::string& path,
 }
 
 std::vector<uint8_t> load_public_key(const std::string& path, MlKemLevel& level_out) {
-    std::ifstream f(path);
+    std::ifstream f(std::filesystem::u8path(path));
     if (!f) throw FileException("Cannot open public key: " + path);
 
     std::string line;
@@ -190,7 +191,7 @@ std::vector<uint8_t> load_public_key(const std::string& path, MlKemLevel& level_
 
 std::vector<uint8_t> load_private_key(const std::string& path, MlKemLevel& level_out,
                                        const std::string& passphrase) {
-    std::ifstream f(path);
+    std::ifstream f(std::filesystem::u8path(path));
     if (!f) throw FileException("Cannot open private key: " + path);
 
     std::string line;

@@ -12,7 +12,7 @@ namespace common {
 
 namespace {
 bool has_extension(const std::string& path, const std::vector<std::string>& exts) {
-    std::filesystem::path p(path);
+    std::filesystem::path p = std::filesystem::u8path(path);
     auto ext = p.extension().string();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     return std::find(exts.begin(), exts.end(), ext) != exts.end();

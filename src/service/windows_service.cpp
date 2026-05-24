@@ -30,21 +30,25 @@ WindowsService::~WindowsService() {
 }
 
 bool WindowsService::install_service(const std::string& executable_path) {
-    SC_HANDLE sc_manager = OpenSCManager(nullptr, nullptr, SC_MANAGER_CREATE_SERVICE);
+    SC_HANDLE sc_manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CREATE_SERVICE);
     if (!sc_manager) {
         log_error("Failed to open Service Control Manager");
         return false;
     }
 
-    SC_HANDLE service = CreateServiceA(
+    std::wstring w_service_name = std::filesystem::u8path(service_name_).wstring();
+    std::wstring w_display_name = std::filesystem::u8path(display_name_).wstring();
+    std::wstring w_executable_path = std::filesystem::u8path(executable_path).wstring();
+
+    SC_HANDLE service = CreateServiceW(
         sc_manager,
-        service_name_.c_str(),
-        display_name_.c_str(),
+        w_service_name.c_str(),
+        w_display_name.c_str(),
         SERVICE_ALL_ACCESS,
         SERVICE_WIN32_OWN_PROCESS,
         SERVICE_DEMAND_START,
         SERVICE_ERROR_NORMAL,
-        executable_path.c_str(),
+        w_executable_path.c_str(),
         nullptr, nullptr, nullptr, nullptr, nullptr
     );
 
@@ -67,13 +71,14 @@ bool WindowsService::install_service(const std::string& executable_path) {
 }
 
 bool WindowsService::uninstall_service() {
-    SC_HANDLE sc_manager = OpenSCManager(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE sc_manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (!sc_manager) {
         log_error("Failed to open Service Control Manager");
         return false;
     }
 
-    SC_HANDLE service = OpenServiceA(sc_manager, service_name_.c_str(), SERVICE_STOP | DELETE);
+    std::wstring w_service_name = std::filesystem::u8path(service_name_).wstring();
+    SC_HANDLE service = OpenServiceW(sc_manager, w_service_name.c_str(), SERVICE_STOP | DELETE);
     if (!service) {
         log_error("Failed to open service");
         CloseServiceHandle(sc_manager);
@@ -100,20 +105,21 @@ bool WindowsService::uninstall_service() {
 }
 
 bool WindowsService::start_service() {
-    SC_HANDLE sc_manager = OpenSCManager(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE sc_manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (!sc_manager) {
         log_error("Failed to open Service Control Manager");
         return false;
     }
 
-    SC_HANDLE service = OpenServiceA(sc_manager, service_name_.c_str(), SERVICE_START | SERVICE_QUERY_STATUS);
+    std::wstring w_service_name = std::filesystem::u8path(service_name_).wstring();
+    SC_HANDLE service = OpenServiceW(sc_manager, w_service_name.c_str(), SERVICE_START | SERVICE_QUERY_STATUS);
     if (!service) {
         log_error("Failed to open service");
         CloseServiceHandle(sc_manager);
         return false;
     }
 
-    bool success = StartServiceA(service, 0, nullptr) != 0;
+    bool success = StartServiceW(service, 0, nullptr) != 0;
     if (success) {
         std::cout << "Service start command sent successfully." << std::endl;
         
@@ -147,13 +153,14 @@ bool WindowsService::start_service() {
 }
 
 bool WindowsService::stop_service() {
-    SC_HANDLE sc_manager = OpenSCManager(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE sc_manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (!sc_manager) {
         log_error("Failed to open Service Control Manager");
         return false;
     }
 
-    SC_HANDLE service = OpenServiceA(sc_manager, service_name_.c_str(), SERVICE_STOP);
+    std::wstring w_service_name = std::filesystem::u8path(service_name_).wstring();
+    SC_HANDLE service = OpenServiceW(sc_manager, w_service_name.c_str(), SERVICE_STOP);
     if (!service) {
         log_error("Failed to open service");
         CloseServiceHandle(sc_manager);
@@ -174,10 +181,11 @@ bool WindowsService::stop_service() {
 }
 
 bool WindowsService::is_service_running() {
-    SC_HANDLE sc_manager = OpenSCManager(nullptr, nullptr, SC_MANAGER_CONNECT);
+    SC_HANDLE sc_manager = OpenSCManagerW(nullptr, nullptr, SC_MANAGER_CONNECT);
     if (!sc_manager) return false;
 
-    SC_HANDLE service = OpenServiceA(sc_manager, service_name_.c_str(), SERVICE_QUERY_STATUS);
+    std::wstring w_service_name = std::filesystem::u8path(service_name_).wstring();
+    SC_HANDLE service = OpenServiceW(sc_manager, w_service_name.c_str(), SERVICE_QUERY_STATUS);
     if (!service) {
         CloseServiceHandle(sc_manager);
         return false;
@@ -193,25 +201,27 @@ bool WindowsService::is_service_running() {
 }
 
 void WindowsService::run_service() {
-    SERVICE_TABLE_ENTRYA service_table[] = {
-        { const_cast<char*>(service_name_.c_str()), service_main },
+    std::wstring w_service_name = std::filesystem::u8path(service_name_).wstring();
+    SERVICE_TABLE_ENTRYW service_table[] = {
+        { const_cast<wchar_t*>(w_service_name.c_str()), service_main },
         { nullptr, nullptr }
     };
 
-    if (!StartServiceCtrlDispatcherA(service_table)) {
+    if (!StartServiceCtrlDispatcherW(service_table)) {
         log_error("StartServiceCtrlDispatcher failed");
     }
 }
 
-void WINAPI WindowsService::service_main(DWORD argc, LPTSTR* argv) {
+void WINAPI WindowsService::service_main(DWORD argc, LPWSTR* argv) {
     if (!instance_) {
         OutputDebugStringA("NetCopy Service: instance_ is null");
         return;
     }
 
     OutputDebugStringA("NetCopy Service: Registering control handler");
-    service_status_handle_ = RegisterServiceCtrlHandlerA(
-        instance_->service_name_.c_str(),
+    std::wstring w_service_name = std::filesystem::u8path(instance_->service_name_).wstring();
+    service_status_handle_ = RegisterServiceCtrlHandlerW(
+        w_service_name.c_str(),
         service_ctrl_handler
     );
 
@@ -286,23 +296,23 @@ bool WindowsService::start_server_process() {
     std::string config_path = get_executable_directory() + "\\server.conf";
     std::string cmd_line = "\"" + server_executable_ + "\" --daemon --config \"" + config_path + "\" --verbose";
 
-    STARTUPINFOA si = {};
+    std::wstring w_cmd_line = std::filesystem::u8path(cmd_line).wstring();
+    std::wstring w_working_dir = std::filesystem::u8path(get_executable_directory()).wstring();
+
+    STARTUPINFOW si = {};
     PROCESS_INFORMATION pi = {};
     si.cb = sizeof(si);
 
-    // Get working directory (same as executable directory)
-    std::string working_dir = get_executable_directory();
-
     // Start the server process
-    BOOL success = CreateProcessA(
+    BOOL success = CreateProcessW(
         nullptr,
-        const_cast<char*>(cmd_line.c_str()),
+        const_cast<wchar_t*>(w_cmd_line.c_str()),
         nullptr,
         nullptr,
         FALSE,
         CREATE_NO_WINDOW,
         nullptr,
-        working_dir.c_str(),
+        w_working_dir.c_str(),
         &si,
         &pi
     );
@@ -370,10 +380,10 @@ void WindowsService::log_error(const std::string& message) {
 }
 
 std::string WindowsService::get_executable_directory() {
-    char path[MAX_PATH];
-    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    wchar_t path[MAX_PATH];
+    GetModuleFileNameW(nullptr, path, MAX_PATH);
     std::filesystem::path exe_path(path);
-    return exe_path.parent_path().string();
+    return exe_path.parent_path().u8string();
 }
 
 } // namespace service

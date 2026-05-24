@@ -119,6 +119,14 @@ void Client::connect(const std::string& server_address, uint16_t port) {
 }
 
 void Client::disconnect() {
+    if (connected_ && socket_) {
+        try {
+            protocol::Disconnect msg;
+            send_message(msg);
+        } catch (...) {
+            // Ignore errors during disconnect message sending
+        }
+    }
     if (socket_) {
         socket_->close();
     }
@@ -157,6 +165,13 @@ void Client::transfer_directory(const std::string& local_path,
     }
 
     auto files = file::FileManager::list_directory(local_path, recursive);
+    
+    struct FileTransferTask {
+        std::string local_path;
+        std::string remote_path;
+    };
+    std::vector<FileTransferTask> file_tasks;
+    
     for (const auto& entry : files) {
         std::string relative = entry.path;
         if (relative.find(local_path) == 0) {
@@ -175,13 +190,122 @@ void Client::transfer_directory(const std::string& local_path,
                 create_empty_directory(destination);
             }
         } else {
-            transfer_single_file(entry.path, destination, resume);
+            file_tasks.push_back({entry.path, destination});
         }
+    }
+    
+    if (file_tasks.empty()) {
+        return;
+    }
+    
+    uint32_t max_threads = negotiated_parallel_streams_ == 0 ? 1 : negotiated_parallel_streams_;
+    if (max_threads <= 1 || file_tasks.size() <= 1) {
+        // Sequential transfer
+        for (const auto& task : file_tasks) {
+            transfer_single_file(task.local_path, task.remote_path, resume);
+        }
+        return;
+    }
+    
+    // Concurrent transfer over multiple socket connections
+    std::mutex queue_mutex;
+    size_t next_task_idx = 0;
+    std::exception_ptr first_error;
+    std::mutex error_mutex;
+    
+    auto record_error = [&](std::exception_ptr error) {
+        std::lock_guard<std::mutex> lock(error_mutex);
+        if (!first_error) {
+            first_error = error;
+        }
+    };
+    
+    uint32_t num_threads = (std::min)(max_threads, static_cast<uint32_t>(file_tasks.size()));
+    std::mutex progress_callback_mutex;
+    auto safe_progress_callback = [&](uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file) {
+        if (progress_callback_) {
+            std::lock_guard<std::mutex> lock(progress_callback_mutex);
+            progress_callback_(bytes_transferred, total_bytes, current_file);
+        }
+    };
+    
+    auto worker_body = [&]() {
+        try {
+            Client stream_client;
+            stream_client.set_config(config_);
+            stream_client.set_security_level(security_level_);
+            stream_client.set_requested_parallel_streams(1); // Enforce single thread/connection per file transfer
+            stream_client.bandwidth_limiter_ = bandwidth_limiter_;
+            stream_client.set_progress_callback(safe_progress_callback); // Propagate progress callback safely
+            stream_client.set_overwrite_callback(overwrite_callback_);
+            
+            {
+                std::lock_guard<std::mutex> lock(workers_mutex_);
+                if (cancel_requested_) {
+                    return;
+                }
+                active_workers_.push_back(&stream_client);
+            }
+            
+            struct Cleanup {
+                Client* client;
+                std::mutex& mutex;
+                std::vector<Client*>& workers;
+                ~Cleanup() {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    auto it = std::find(workers.begin(), workers.end(), client);
+                    if (it != workers.end()) {
+                        workers.erase(it);
+                    }
+                }
+            } cleanup{&stream_client, workers_mutex_, active_workers_};
+
+            stream_client.connect(server_address_, server_port_);
+            
+            while (true) {
+                if (cancel_requested_ || stream_client.cancel_requested_) {
+                    break;
+                }
+                size_t idx;
+                {
+                    std::lock_guard<std::mutex> lock(queue_mutex);
+                    if (next_task_idx >= file_tasks.size() || first_error) {
+                        break;
+                    }
+                    idx = next_task_idx++;
+                }
+                
+                const auto& task = file_tasks[idx];
+                stream_client.transfer_single_file(task.local_path, task.remote_path, resume);
+            }
+        } catch (...) {
+            record_error(std::current_exception());
+        }
+    };
+    
+    std::vector<std::thread> workers;
+    workers.reserve(num_threads);
+    for (uint32_t i = 0; i < num_threads; ++i) {
+        workers.emplace_back(worker_body);
+    }
+    
+    for (auto& worker : workers) {
+        if (worker.joinable()) {
+            worker.join();
+        }
+    }
+    
+    if (first_error) {
+        std::rethrow_exception(first_error);
     }
 }
 
 void Client::set_progress_callback(ProgressCallback callback) {
     progress_callback_ = std::move(callback);
+}
+
+void Client::set_overwrite_callback(OverwriteCallback callback) {
+    overwrite_callback_ = std::move(callback);
 }
 
 std::string Client::get_last_error() const {
@@ -222,6 +346,16 @@ void Client::perform_handshake() {
             throw CryptoException("Server requires authentication but no secret key is configured");
         }
         crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, config_.secret_key);
+        
+        // Derive dynamic session key with nonces
+        auto derived = common::derive_session_key(
+            config_.secret_key,
+            {},
+            response->server_nonce,
+            request.client_nonce);
+        std::string hex_derived = common::to_hex_string(derived);
+        crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, "0x" + hex_derived);
+        LOG_DEBUG("Derived dynamic session key with nonces");
     }
 
     // User authentication phase
@@ -233,6 +367,7 @@ void Client::perform_handshake() {
         }
 
         std::vector<uint8_t> proof;
+        std::vector<uint8_t> mlkem_shared_secret;
 
         if (auth_challenge->method == 1) { // PASSWORD
             // Derive key from password
@@ -256,6 +391,7 @@ void Client::perform_handshake() {
             auto shared_secret = crypto::MlKem::decapsulate(privkey,
                                                              auth_challenge->kem_ciphertext,
                                                              level);
+            mlkem_shared_secret = shared_secret;
             // proof = SHA3-256(shared_secret || kem_nonce)
             std::vector<uint8_t> preimage = shared_secret;
             preimage.insert(preimage.end(),
@@ -275,6 +411,17 @@ void Client::perform_handshake() {
             throw AuthException("Authentication failed: " + err);
         }
         LOG_INFO("Authenticated as '" + config_.username + "'");
+
+        if (auth_challenge->method == 2 && crypto_engine_) {
+            auto derived = common::derive_session_key(
+                config_.secret_key,
+                mlkem_shared_secret,
+                response->server_nonce,
+                request.client_nonce);
+            std::string hex_derived = common::to_hex_string(derived);
+            crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, "0x" + hex_derived);
+            LOG_DEBUG("Re-derived dynamic session key with ML-KEM shared secret");
+        }
     }
 }
 
@@ -335,12 +482,177 @@ std::vector<uint8_t> Client::decrypt_message(const std::vector<uint8_t>& data) {
 
 void Client::transfer_single_file(const std::string& local_path, const std::string& remote_path, bool resume) {
     cancel_requested_ = false;
-    uint64_t total_size = file::FileManager::file_size(local_path);
+    bool is_sym = file::FileManager::is_symlink(local_path);
+    uint64_t total_size = is_sym ? 0 : file::FileManager::file_size(local_path);
 
     uint64_t resume_offset = 0;
-    send_file_request(local_path, remote_path, resume, !resume, resume_offset);
+    uint64_t remote_file_size = 0;
+    send_file_request(local_path, remote_path, resume, !resume, resume_offset, &remote_file_size);
     if (resume_offset > total_size) {
         throw FileException("Resume offset is larger than source file");
+    }
+
+    if (!is_sym && remote_file_size > 0 && !resume) {
+        if (overwrite_callback_) {
+            auto decision = overwrite_callback_(remote_path, remote_file_size);
+            if (decision == OverwriteDecision::SKIP) {
+                LOG_INFO("Skipping existing file: " + remote_path);
+                if (progress_callback_) {
+                    progress_callback_(total_size, total_size, local_path);
+                }
+                return;
+            } else if (decision == OverwriteDecision::CANCEL) {
+                request_cancel();
+                throw FileException("Transfer cancelled by user");
+            }
+        }
+        LOG_INFO("Remote file exists (size " + std::to_string(remote_file_size) + " bytes). Performing delta sync for " + local_path);
+        
+        // 1. Send BlockHashesRequest
+        protocol::BlockHashesRequest req;
+        req.file_path = remote_path;
+        req.block_size = 65536; // 64KB
+        
+        send_message(req);
+        
+        // 2. Receive BlockHashesResponse
+        auto resp_msg = receive_message();
+        auto resp = dynamic_cast<protocol::BlockHashesResponse*>(resp_msg.get());
+        if (!resp) {
+            throw ProtocolException("Expected BlockHashesResponse");
+        }
+        if (!resp->success) {
+            throw FileException("Failed to get remote block hashes: " + resp->error_message);
+        }
+        
+        // 3. Compute local block hashes
+        uint64_t block_size = resp->block_size > 0 ? resp->block_size : 65536;
+        auto local_hashes = file::FileManager::compute_block_hashes(local_path, block_size);
+        
+        // 4. Compare hashes block by block
+        struct BlockRange {
+            uint64_t offset;
+            uint64_t size;
+        };
+        std::vector<BlockRange> diffs;
+        const auto& remote_blocks = resp->blocks;
+        
+        size_t i = 0;
+        for (; i < (std::min)(local_hashes.size(), remote_blocks.size()); ++i) {
+            if (local_hashes[i].hash != remote_blocks[i].hash) {
+                diffs.push_back({local_hashes[i].offset, (std::min)(block_size, total_size - local_hashes[i].offset)});
+            }
+        }
+        // If local file is larger, transfer remaining blocks
+        for (; i < local_hashes.size(); ++i) {
+            diffs.push_back({local_hashes[i].offset, (std::min)(block_size, total_size - local_hashes[i].offset)});
+        }
+        
+        // 5. Merge contiguous differing blocks to optimize transfers
+        std::vector<BlockRange> merged_diffs;
+        for (const auto& diff : diffs) {
+            if (!merged_diffs.empty() && merged_diffs.back().offset + merged_diffs.back().size == diff.offset) {
+                merged_diffs.back().size += diff.size;
+            } else {
+                merged_diffs.push_back(diff);
+            }
+        }
+        
+        // 6. Transfer differing blocks
+        bandwidth_monitor_.reset();
+        chunk_size_manager_.reset();
+        common::BandwidthMonitor transfer_monitor;
+        
+        auto make_chunk_manager = [&]() {
+            return common::ChunkSizeManager(
+                config_.initial_chunk_size,
+                config_.min_chunk_size,
+                negotiated_max_chunk_size_,
+                config_.chunk_size_increase_factor,
+                config_.chunk_size_decrease_factor,
+                0.3);
+        };
+        
+        auto chunk_manager = make_chunk_manager();
+        
+        // Setup progress tracking: we want to track overall progress based on the total file size
+        uint64_t total_diff_bytes = 0;
+        for (const auto& diff : merged_diffs) {
+            total_diff_bytes += diff.size;
+        }
+        uint64_t matching_bytes = total_size > total_diff_bytes ? total_size - total_diff_bytes : 0;
+        std::atomic<uint64_t> total_transferred(matching_bytes);
+        
+        auto make_progress_callback = [&](uint64_t range_start) {
+            return [&, range_start](uint64_t delta) {
+                uint64_t current = total_transferred.fetch_add(delta) + delta;
+                if (progress_callback_) {
+                    progress_callback_(current, total_size, local_path);
+                }
+            };
+        };
+        
+        if (merged_diffs.empty()) {
+            // No differing blocks! File is already identical, but we must send a 0-byte last chunk to finalize the transfer
+            protocol::FileData data_msg;
+            data_msg.offset = total_size;
+            data_msg.uncompressed_size = 0;
+            data_msg.is_last_chunk = true;
+            data_msg.compressed = false;
+            send_message(data_msg);
+            
+            auto ack_msg = receive_message();
+            auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
+            if (!ack || !ack->success) {
+                throw FileException("Transfer finalization failed: " + (ack ? ack->error_message : "No acknowledgment"));
+            }
+            if (progress_callback_) {
+                progress_callback_(total_size, total_size, local_path);
+            }
+        } else {
+            // Stream each merged diff range
+            for (size_t d = 0; d < merged_diffs.size(); ++d) {
+                const auto& diff = merged_diffs[d];
+                bool is_last_diff = (d == merged_diffs.size() - 1);
+                
+                send_file_range(
+                    local_path,
+                    diff.offset,
+                    diff.offset + diff.size,
+                    total_size,
+                    chunk_manager,
+                    transfer_monitor,
+                    make_progress_callback(diff.offset),
+                    is_last_diff
+                );
+            }
+        }
+        
+        // E2E Integrity verification
+        if (total_size > 0) {
+            LOG_INFO("Performing E2E integrity check for: " + local_path);
+            auto local_hash = file::FileManager::compute_file_hash(local_path);
+            
+            protocol::FileVerifyRequest verify_req;
+            verify_req.file_path = remote_path;
+            verify_req.expected_hash = local_hash;
+            
+            send_message(verify_req);
+            
+            auto verify_resp_msg = receive_message();
+            auto verify_resp = dynamic_cast<protocol::FileVerifyResponse*>(verify_resp_msg.get());
+            if (!verify_resp) {
+                throw ProtocolException("Expected FileVerifyResponse");
+            }
+            
+            if (!verify_resp->success) {
+                throw FileException("Integrity verification failed for " + local_path + ": " + verify_resp->error_message);
+            }
+            
+            LOG_INFO("E2E Integrity verification succeeded for: " + local_path);
+        }
+        
+        return; // Done with delta sync!
     }
 
     bandwidth_monitor_.reset();
@@ -363,21 +675,26 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
     };
     if (stream_count <= 1 || total_size == resume_offset) {
         send_file_data(local_path, resume_offset, total_size);
+        if (total_size == resume_offset && progress_callback_) {
+            progress_callback_(total_size, total_size, local_path);
+        }
         return;
     }
 
-    std::atomic<uint64_t> next_offset(resume_offset);
+    uint64_t total_to_transfer = total_size - resume_offset;
+    uint64_t partition_size = (total_to_transfer + stream_count - 1) / stream_count;
+
     std::atomic<uint64_t> transferred(resume_offset);
     std::exception_ptr first_error;
     std::mutex error_mutex;
     std::mutex progress_mutex;
-    const uint64_t range_granularity = (std::max<uint64_t>)(negotiated_max_chunk_size_, config_.initial_chunk_size);
 
     auto record_error = [&](std::exception_ptr error) {
         std::lock_guard<std::mutex> lock(error_mutex);
         if (!first_error) {
             first_error = error;
         }
+        request_cancel();
     };
 
     auto make_progress_callback = [&]() {
@@ -395,27 +712,48 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
             Client stream_client;
             stream_client.set_config(config_);
             stream_client.set_security_level(security_level_);
+            stream_client.set_requested_parallel_streams(1);
             stream_client.set_buffer_pool(buffer_pool_); // Propagate buffer pool
             stream_client.bandwidth_limiter_ = bandwidth_limiter_;
+            
+            {
+                std::lock_guard<std::mutex> lock(workers_mutex_);
+                if (cancel_requested_) {
+                    return;
+                }
+                active_workers_.push_back(&stream_client);
+            }
+
+            struct Cleanup {
+                Client* client;
+                std::mutex& mutex;
+                std::vector<Client*>& workers;
+                ~Cleanup() {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    auto it = std::find(workers.begin(), workers.end(), client);
+                    if (it != workers.end()) {
+                        workers.erase(it);
+                    }
+                }
+            } cleanup{&stream_client, workers_mutex_, active_workers_};
+
             stream_client.connect(server_address_, server_port_);
             common::ChunkSizeManager worker_chunk_manager = make_chunk_manager();
 
             uint64_t worker_resume_offset = 0;
             stream_client.send_file_request(local_path, remote_path, false, false, worker_resume_offset);
 
-            while (true) {
-                uint64_t start = next_offset.fetch_add(range_granularity);
-                if (start >= total_size) {
-                    break;
-                }
-                uint64_t end = (std::min)(start + range_granularity, total_size);
+            uint64_t start = resume_offset + stream_index * partition_size;
+            if (start < total_size) {
+                uint64_t end = (std::min)(start + partition_size, total_size);
                 stream_client.send_file_range(local_path,
                                                start,
                                                end,
                                                total_size,
                                                worker_chunk_manager,
                                                transfer_monitor,
-                                               make_progress_callback());
+                                               make_progress_callback(),
+                                               false);
             }
         } catch (...) {
             record_error(std::current_exception());
@@ -430,19 +768,17 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
 
     try {
         common::ChunkSizeManager main_chunk_manager = make_chunk_manager();
-        while (true) {
-            uint64_t start = next_offset.fetch_add(range_granularity);
-            if (start >= total_size) {
-                break;
-            }
-            uint64_t end = (std::min)(start + range_granularity, total_size);
+        uint64_t start = resume_offset;
+        if (start < total_size) {
+            uint64_t end = (std::min)(start + partition_size, total_size);
             send_file_range(local_path,
                             start,
                             end,
                             total_size,
                             main_chunk_manager,
                             transfer_monitor,
-                            make_progress_callback());
+                            make_progress_callback(),
+                            false);
         }
     } catch (...) {
         record_error(std::current_exception());
@@ -465,13 +801,52 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
     if (transferred.load() != total_size) {
         throw FileException("Parallel transfer ended before all bytes were acknowledged");
     }
+
+    // Send finalization chunk on the main connection
+    protocol::FileData final_msg;
+    final_msg.offset = total_size;
+    final_msg.uncompressed_size = 0;
+    final_msg.is_last_chunk = true;
+    final_msg.compressed = false;
+    send_message(final_msg);
+
+    auto ack_msg = receive_message();
+    auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
+    if (!ack || !ack->success) {
+        throw FileException("Transfer finalization failed: " + (ack ? ack->error_message : "No acknowledgment"));
+    }
+    
+    // E2E Integrity check
+    if (total_size > 0) {
+        LOG_INFO("Performing E2E integrity check for: " + local_path);
+        auto local_hash = file::FileManager::compute_file_hash(local_path);
+        
+        protocol::FileVerifyRequest verify_req;
+        verify_req.file_path = remote_path;
+        verify_req.expected_hash = local_hash;
+        
+        send_message(verify_req);
+        
+        auto verify_resp_msg = receive_message();
+        auto verify_resp = dynamic_cast<protocol::FileVerifyResponse*>(verify_resp_msg.get());
+        if (!verify_resp) {
+            throw ProtocolException("Expected FileVerifyResponse");
+        }
+        
+        if (!verify_resp->success) {
+            throw FileException("Integrity verification failed for " + local_path + ": " + verify_resp->error_message);
+        }
+        
+        LOG_INFO("E2E Integrity verification succeeded for: " + local_path);
+    }
 }
 
 void Client::send_file_request(const std::string& local_path,
                                const std::string& remote_path,
                                bool resume,
                                bool truncate_destination,
-                               uint64_t& resume_offset) {
+                               uint64_t& resume_offset,
+                               uint64_t* remote_file_size) {
     protocol::FileRequest request;
     request.source_path = common::convert_to_unix_path(local_path);
     request.destination_path = common::convert_to_unix_path(remote_path);
@@ -479,6 +854,15 @@ void Client::send_file_request(const std::string& local_path,
     request.resume_offset = resume ? 1 : 0;
     request.auto_create_directories = config_.auto_create_directories;
     request.truncate_destination = truncate_destination;
+    
+    // Assign metadata fields
+    request.permissions = file::FileManager::get_permissions(local_path);
+    request.is_symlink = file::FileManager::is_symlink(local_path);
+    if (request.is_symlink) {
+        request.symlink_target = file::FileManager::read_symlink(local_path);
+    }
+    request.file_size = request.is_symlink ? 0 : file::FileManager::file_size(local_path);
+    
     send_message(request);
 
     auto response_msg = receive_message();
@@ -491,6 +875,9 @@ void Client::send_file_request(const std::string& local_path,
     }
 
     resume_offset = resume ? response->resume_offset : 0;
+    if (remote_file_size) {
+        *remote_file_size = response->file_size;
+    }
 }
 
 void Client::send_file_data(const std::string& file_path, uint64_t resume_offset, uint64_t total_size) {
@@ -517,7 +904,7 @@ void Client::send_file_data(const std::string& file_path, uint64_t resume_offset
         if (progress_callback_) {
             progress_callback_(resume_offset + bandwidth_monitor_.get_total_bytes(), total_size, file_path);
         }
-    });
+    }, true);
 }
 
 void Client::send_file_range(const std::string& file_path,
@@ -526,7 +913,8 @@ void Client::send_file_range(const std::string& file_path,
                              uint64_t total_size,
                              common::ChunkSizeManager& shared_chunk_manager,
                              common::BandwidthMonitor& shared_bandwidth_monitor,
-                             const std::function<void(uint64_t)>& progress_delta_callback) {
+                             const std::function<void(uint64_t)>& progress_delta_callback,
+                             bool is_final_range) {
     if (!buffer_pool_) {
         // Fallback buffer pool initialization
         buffer_pool_ = std::make_shared<BufferPool>(negotiated_max_chunk_size_ > 0 ? negotiated_max_chunk_size_ : 10 * 1024 * 1024, 16);
@@ -630,7 +1018,7 @@ void Client::send_file_range(const std::string& file_path,
                 ReadAheadChunk chunk;
                 chunk.offset = current_read_offset;
                 chunk.data = std::move(buffer);
-                chunk.is_last = (current_read_offset + bytes_read >= total_size);
+                chunk.is_last = is_final_range && (current_read_offset + bytes_read >= end_offset);
                 
                 read_queue.push(std::move(chunk));
                 current_read_offset += bytes_read;
@@ -805,6 +1193,12 @@ void Client::set_error(const std::string& error) {
 
 void Client::request_cancel() {
     cancel_requested_ = true;
+    std::lock_guard<std::mutex> lock(workers_mutex_);
+    for (auto* worker : active_workers_) {
+        if (worker) {
+            worker->request_cancel();
+        }
+    }
 }
 
 void Client::clear_error() {
@@ -836,6 +1230,47 @@ void Client::download_file(const std::string& remote_path, const std::string& lo
 
     if (response->is_directory) {
         file::FileManager::create_directories(local_path);
+        return;
+    }
+
+    if (response->is_symlink) {
+        // Receive the empty FileData chunk to align the connection state
+        auto msg = receive_message();
+        auto file_data = dynamic_cast<protocol::FileData*>(msg.get());
+        if (!file_data) {
+            throw ProtocolException("Expected FileData");
+        }
+        
+        // Delete existing file/symlink if it exists to avoid conflicts
+        std::error_code ec;
+        if (std::filesystem::exists(local_path, ec) || std::filesystem::is_symlink(local_path, ec)) {
+            std::filesystem::remove(local_path, ec);
+        }
+        
+        if (!file::FileManager::create_symlink(response->symlink_target, local_path)) {
+            protocol::FileAck ack;
+            ack.success = false;
+            ack.bytes_received = 0;
+            ack.error_message = "Failed to create symlink locally";
+            send_message(ack);
+            throw FileException("Failed to create symlink locally");
+        }
+        
+        if (!file::FileManager::is_symlink(local_path)) {
+            LOG_WARNING("Created placeholder file for symlink (privilege restrictions): " + local_path + " -> " + response->symlink_target);
+        } else {
+            LOG_DEBUG("Successfully created symlink: " + local_path + " -> " + response->symlink_target);
+        }
+        
+        if (response->permissions != 0) {
+            file::FileManager::set_permissions(local_path, response->permissions);
+        }
+        
+        // Send success ACK
+        protocol::FileAck ack;
+        ack.success = true;
+        ack.bytes_received = 0;
+        send_message(ack);
         return;
     }
 
@@ -883,6 +1318,33 @@ void Client::download_file(const std::string& remote_path, const std::string& lo
         }
     }
     fs.close();
+    if (response->permissions != 0) {
+        file::FileManager::set_permissions(local_path, response->permissions);
+    }
+    
+    // E2E Integrity check for download
+    if (total_bytes > 0) {
+        LOG_INFO("Performing E2E integrity check for downloaded file: " + local_path);
+        auto local_hash = file::FileManager::compute_file_hash(local_path);
+        
+        protocol::FileVerifyRequest verify_req;
+        verify_req.file_path = remote_path;
+        verify_req.expected_hash = local_hash;
+        
+        send_message(verify_req);
+        
+        auto verify_resp_msg = receive_message();
+        auto verify_resp = dynamic_cast<protocol::FileVerifyResponse*>(verify_resp_msg.get());
+        if (!verify_resp) {
+            throw ProtocolException("Expected FileVerifyResponse");
+        }
+        
+        if (!verify_resp->success) {
+            throw FileException("Download integrity verification failed for " + local_path + ": " + verify_resp->error_message);
+        }
+        
+        LOG_INFO("Download E2E Integrity verification succeeded for: " + local_path);
+    }
 }
 
 std::vector<protocol::RemoteFileInfo> Client::list_remote_directory(const std::string& remote_path, bool recursive) {

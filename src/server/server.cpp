@@ -17,24 +17,6 @@ namespace netcopy {
 namespace server {
 
 // Helper: derive session key from base key + ML-KEM material (Task 4)
-static std::vector<uint8_t> derive_session_key(
-    const std::string& base_key_hex,
-    const std::vector<uint8_t>& session_secret,
-    const std::vector<uint8_t>& server_nonce,
-    const std::vector<uint8_t>& client_nonce)
-{
-    std::string hex = base_key_hex;
-    if (hex.size() > 2 && hex.substr(0, 2) == "0x") hex = hex.substr(2);
-    auto base_key = netcopy::common::from_hex_string(hex);
-
-    std::vector<uint8_t> material;
-    material.insert(material.end(), base_key.begin(), base_key.end());
-    material.insert(material.end(), session_secret.begin(), session_secret.end());
-    material.insert(material.end(), server_nonce.begin(), server_nonce.end());
-    material.insert(material.end(), client_nonce.begin(), client_nonce.end());
-
-    return netcopy::crypto::sha3_256(material);
-}
 
 // ConnectionHandler implementation
 ConnectionHandler::ConnectionHandler(network::Socket client_socket, 
@@ -43,7 +25,7 @@ ConnectionHandler::ConnectionHandler(network::Socket client_socket,
     : client_socket_(std::move(client_socket)), config_(config), crypto_(crypto), 
       negotiated_security_level_(crypto::SecurityLevel::HIGH), sequence_number_(1), handshake_completed_(false),
       current_auto_create_(true), current_truncate_on_zero_(true), current_transfer_completed_(false),
-      negotiated_max_chunk_size_(config.max_chunk_size) {
+      negotiated_max_chunk_size_(config.max_chunk_size), current_is_symlink_(false), current_symlink_target_(""), current_permissions_(0), current_expected_file_size_(0) {
     client_address_ = get_client_address();
     
     // Load user database
@@ -100,6 +82,16 @@ void ConnectionHandler::handle() {
                     if (req) handle_list_request(*req);
                     break;
                 }
+                case protocol::MessageType::FILE_VERIFY_REQUEST: {
+                    auto req = dynamic_cast<protocol::FileVerifyRequest*>(message.get());
+                    if (req) handle_file_verify_request(*req);
+                    break;
+                }
+                case protocol::MessageType::BLOCK_HASHES_REQUEST: {
+                    auto req = dynamic_cast<protocol::BlockHashesRequest*>(message.get());
+                    if (req) handle_block_hashes_request(*req);
+                    break;
+                }
                 case protocol::MessageType::DISCONNECT: {
                     LOG_INFO("Client " + client_address_ + " disconnected gracefully");
                     return;
@@ -111,8 +103,13 @@ void ConnectionHandler::handle() {
         }
         
     } catch (const std::exception& e) {
-        LOG_ERROR("Connection error with " + client_address_ + ": " + e.what());
-        logging::AuditLog::instance().log_connect("", client_address_, false);
+        std::string err_msg = e.what();
+        if (err_msg == "Connection closed by peer") {
+            LOG_INFO("Connection closed by peer " + client_address_);
+        } else {
+            LOG_ERROR("Connection error with " + client_address_ + ": " + err_msg);
+            logging::AuditLog::instance().log_connect("", client_address_, false);
+        }
     }
     
     LOG_INFO("Connection closed with " + client_address_);
@@ -160,12 +157,25 @@ void ConnectionHandler::perform_handshake() {
     response.authentication_required = config_.require_auth;
     response.accepted_security_level = negotiated_security_level_;
     response.max_chunk_size = negotiated_max_chunk_size_;
+    response.accepted_parallel_streams = request->requested_parallel_streams == 0 ? 1 : (std::min)(8u, request->requested_parallel_streams);
+    response.auto_create_directories_allowed = config_.auto_create_directories;
     
     // Save nonces for session key derivation (Task 4)
     server_nonce_from_handshake_ = response.server_nonce;
     client_nonce_from_handshake_ = request->client_nonce;
     
     send_message(response);
+    
+    if (crypto_engine_ && !config_.secret_key.empty()) {
+        auto derived = common::derive_session_key(
+            config_.secret_key,
+            {},
+            server_nonce_from_handshake_,
+            client_nonce_from_handshake_);
+        std::string hex_derived = common::to_hex_string(derived);
+        crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, "0x" + hex_derived);
+        LOG_DEBUG("Derived dynamic session key with nonces");
+    }
     
     // Auth phase
     bool auth_needed = false;
@@ -241,9 +251,9 @@ void ConnectionHandler::perform_handshake() {
 
             // Re-derive transport key mixing in the ML-KEM shared secret for forward secrecy
             if (method == auth::AuthMethod::MLKEM && crypto_engine_) {
-                auto derived = derive_session_key(
+                auto derived = common::derive_session_key(
                     config_.secret_key,
-                    challenge.kem_ciphertext,
+                    challenge.kem_shared_secret,
                     server_nonce_from_handshake_,
                     client_nonce_from_handshake_);
                 std::string hex_derived = common::to_hex_string(derived);
@@ -297,7 +307,11 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         LOG_DEBUG("Setting current file path to: " + current_file_path_);
         
         current_auto_create_ = request.auto_create_directories;
-        current_truncate_on_zero_ = (request.resume_offset == 0);
+        current_truncate_on_zero_ = request.truncate_destination;
+        current_is_symlink_ = request.is_symlink;
+        current_symlink_target_ = request.symlink_target;
+        current_permissions_ = request.permissions;
+        current_expected_file_size_ = request.file_size;
         
         // Check if this is a resume request
         if (request.resume_offset > 0) {
@@ -317,7 +331,11 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         }
         
         response.success = true;
-        response.file_size = 0; // Will be updated as we receive data
+        if (!current_is_symlink_ && file::FileManager::exists(resolved_path) && file::FileManager::is_regular_file(resolved_path)) {
+            response.file_size = file::FileManager::file_size(resolved_path);
+        } else {
+            response.file_size = 0;
+        }
         
     } catch (const std::exception& e) {
         response.success = false;
@@ -331,15 +349,17 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
 void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
     protocol::FileAck ack;
     bool message_completes_transfer = false;
+    std::string filename;
+    bool is_marker_file = false;
+    if (!current_file_path_.empty()) {
+        filename = file::FileManager::get_filename(current_file_path_);
+        is_marker_file = (filename == ".netcopy_dir_marker" || filename == ".netcopy_empty_dir");
+    }
     
     try {
         if (current_file_path_.empty()) {
             throw std::runtime_error("No file transfer in progress");
         }
-        
-        // Check if this is a directory marker file
-        std::string filename = file::FileManager::get_filename(current_file_path_);
-        bool is_marker_file = (filename == ".netcopy_dir_marker" || filename == ".netcopy_empty_dir");
 
         struct TempChunk {
             uint64_t offset;
@@ -368,7 +388,23 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
                 payload = common::decompress_buffer(chunk.data, static_cast<size_t>(chunk.uncompressed_size));
             }
 
-            if (is_marker_file) {
+            if (current_is_symlink_) {
+                std::error_code ec;
+                if (std::filesystem::exists(current_file_path_, ec) || std::filesystem::is_symlink(current_file_path_, ec)) {
+                    std::filesystem::remove(current_file_path_, ec);
+                }
+                if (!file::FileManager::create_symlink(current_symlink_target_, current_file_path_)) {
+                    throw FileException("Failed to create symlink: " + current_file_path_ + " -> " + current_symlink_target_);
+                }
+                if (!file::FileManager::is_symlink(current_file_path_)) {
+                    LOG_WARNING("Created placeholder file for symlink (privilege restrictions): " + current_file_path_ + " -> " + current_symlink_target_);
+                } else {
+                    LOG_DEBUG("Successfully created symlink: " + current_file_path_ + " -> " + current_symlink_target_);
+                }
+                if (current_permissions_ != 0) {
+                    file::FileManager::set_permissions(current_file_path_, current_permissions_);
+                }
+            } else if (is_marker_file) {
                 // This is an empty directory marker - just ensure the directory exists, don't create the file
                 if (!current_auto_create_) {
                     throw FileException("Server policy does not allow empty directory creation");
@@ -420,6 +456,20 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
     if (ack.success && message_completes_transfer) {
         current_transfer_completed_ = true;
         current_file_stream_.close();
+        if (!current_is_symlink_ && !is_marker_file) {
+            std::error_code ec;
+            uint64_t current_size = file::FileManager::exists(current_file_path_) ? file::FileManager::file_size(current_file_path_) : 0;
+            if (current_size > current_expected_file_size_) {
+                LOG_INFO("Truncating " + current_file_path_ + " from " + std::to_string(current_size) + " to " + std::to_string(current_expected_file_size_));
+                std::filesystem::resize_file(current_file_path_, current_expected_file_size_, ec);
+                if (ec) {
+                    LOG_ERROR("Failed to truncate file: " + ec.message());
+                }
+            }
+        }
+        if (current_permissions_ != 0 && !current_is_symlink_) {
+            file::FileManager::set_permissions(current_file_path_, current_permissions_);
+        }
         // Audit log the completed upload
         logging::AuditLog::instance().log_transfer(
             authenticated_user_, client_address_,
@@ -674,7 +724,7 @@ void Server::stop() {
             listen_socket_->close();
         }
         
-        cleanup_threads();
+        cleanup_threads(true);
         
         LOG_INFO("Server stopped");
     }
@@ -701,13 +751,18 @@ void Server::accept_connections() {
         try {
             auto client_socket = listen_socket_->accept();
             
+            auto finished = std::make_shared<std::atomic<bool>>(false);
+            
             // Create thread to handle client
-            worker_threads_.emplace_back([this, client_socket = std::move(client_socket)]() mutable {
+            std::thread t([this, client_socket = std::move(client_socket), finished]() mutable {
                 handle_client(std::move(client_socket));
+                finished->store(true);
             });
             
+            worker_threads_.push_back({std::move(t), finished});
+            
             // Clean up finished threads
-            cleanup_threads();
+            cleanup_threads(false);
             
         } catch (const std::exception& e) {
             if (running_) {
@@ -726,13 +781,15 @@ void Server::handle_client(network::Socket client_socket) {
     }
 }
 
-void Server::cleanup_threads() {
+void Server::cleanup_threads(bool force_join_all) {
     worker_threads_.erase(
         std::remove_if(worker_threads_.begin(), worker_threads_.end(),
-                      [](std::thread& t) {
-                          if (t.joinable()) {
-                              t.join();
-                              return true;
+                      [force_join_all](WorkerThread& wt) {
+                          if (wt.thread.joinable()) {
+                              if (force_join_all || wt.finished->load()) {
+                                  wt.thread.join();
+                                  return true;
+                              }
                           }
                           return false;
                       }),
@@ -763,11 +820,18 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
     }
 
     resp.is_directory = file::FileManager::is_directory(resolved);
-    resp.file_size = resp.is_directory ? 0 : file::FileManager::file_size(resolved);
+    resp.is_symlink = file::FileManager::is_symlink(resolved);
+    if (resp.is_symlink) {
+        resp.symlink_target = file::FileManager::read_symlink(resolved);
+        resp.file_size = 0;
+    } else {
+        resp.file_size = resp.is_directory ? 0 : file::FileManager::file_size(resolved);
+    }
+    resp.permissions = file::FileManager::get_permissions(resolved);
     resp.success = true;
     send_message(resp);
 
-    if (!resp.is_directory) {
+    if (!resp.is_directory && !resp.is_symlink) {
         file::FileStream fs;
         if (!fs.open_read(resolved)) {
             return;
@@ -800,6 +864,22 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
         }
         fs.close();
         LOG_INFO("Download completed: " + resolved + " (" + std::to_string(offset) + " bytes)");
+    } else if (resp.is_symlink) {
+        // Send a single empty chunk to complete the flow
+        protocol::FileData chunk_msg;
+        chunk_msg.offset = 0;
+        chunk_msg.uncompressed_size = 0;
+        chunk_msg.data = std::vector<uint8_t>();
+        chunk_msg.compressed = false;
+        chunk_msg.is_last_chunk = true;
+        send_message(chunk_msg);
+        
+        auto ack_msg = receive_message();
+        auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
+        if (!ack || !ack->success) {
+            LOG_ERROR("Download symlink ACK failed");
+        }
+        LOG_INFO("Download symlink completed: " + resolved);
     }
 }
 
@@ -830,9 +910,86 @@ void ConnectionHandler::handle_list_request(const protocol::ListRequest& request
         info.size = e.size;
         info.is_directory = e.is_directory;
         info.last_modified = e.last_modified;
+        info.permissions = e.permissions;
+        info.is_symlink = e.is_symlink;
+        info.symlink_target = e.symlink_target;
         resp.entries.push_back(std::move(info));
     }
     send_message(resp);
+}
+
+void ConnectionHandler::handle_file_verify_request(const protocol::FileVerifyRequest& request) {
+    protocol::FileVerifyResponse response;
+    response.success = false;
+    
+    try {
+        std::string resolved = resolve_path(request.file_path);
+        
+        if (!is_path_allowed(request.file_path)) {
+            throw FileException("Access denied: " + request.file_path);
+        }
+        
+        if (!file::FileManager::exists(resolved)) {
+            throw FileException("File not found: " + resolved);
+        }
+        
+        LOG_INFO("Computing checksum for E2E integrity check of " + resolved);
+        auto actual_hash = file::FileManager::compute_file_hash(resolved);
+        response.actual_hash = actual_hash;
+        
+        if (actual_hash == request.expected_hash) {
+            response.success = true;
+            LOG_INFO("E2E integrity check successful for " + resolved);
+        } else {
+            response.success = false;
+            response.error_message = "Integrity check failed: hash mismatch";
+            LOG_ERROR("E2E integrity check failed for " + resolved + " - hash mismatch!");
+        }
+    } catch (const std::exception& e) {
+        response.success = false;
+        response.error_message = e.what();
+        LOG_ERROR("E2E verification error: " + std::string(e.what()));
+    }
+    
+    send_message(response);
+}
+
+void ConnectionHandler::handle_block_hashes_request(const protocol::BlockHashesRequest& request) {
+    protocol::BlockHashesResponse response;
+    response.success = false;
+    response.block_size = request.block_size;
+    
+    try {
+        std::string resolved = resolve_path(request.file_path);
+        
+        if (!is_path_allowed(request.file_path)) {
+            throw FileException("Access denied: " + request.file_path);
+        }
+        
+        if (!file::FileManager::exists(resolved)) {
+            throw FileException("File not found: " + resolved);
+        }
+        
+        current_truncate_on_zero_ = false;
+        
+        LOG_INFO("Computing block hashes for " + resolved + " with block size " + std::to_string(request.block_size));
+        auto file_hashes = file::FileManager::compute_block_hashes(resolved, request.block_size);
+        
+        response.blocks.clear();
+        for (const auto& bh : file_hashes) {
+            protocol::BlockHashInfo info;
+            info.offset = bh.offset;
+            info.hash = bh.hash;
+            response.blocks.push_back(std::move(info));
+        }
+        response.success = true;
+    } catch (const std::exception& e) {
+        response.success = false;
+        response.error_message = e.what();
+        LOG_ERROR("Block hashing error: " + std::string(e.what()));
+    }
+    
+    send_message(response);
 }
 
 } // namespace server

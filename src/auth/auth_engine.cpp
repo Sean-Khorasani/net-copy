@@ -55,6 +55,7 @@ AuthChallengeData AuthEngine::prepare_challenge(const std::string& username, Aut
         auto encap_result = crypto::MlKem::encapsulate(user->mlkem_public_key, user->mlkem_level);
         ch.kem_ciphertext = encap_result.ciphertext;
         ch.kem_nonce      = crypto::random_bytes(32);
+        ch.kem_shared_secret = encap_result.shared_secret;
 
         // expected_proof = SHA3-256(shared_secret || kem_nonce)
         std::vector<uint8_t> preimage;

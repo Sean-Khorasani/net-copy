@@ -14,15 +14,23 @@
 #include <stdexcept>
 #include <sstream>
 #include <atomic>
+#include <filesystem>
+#include <unordered_map>
+#include <unordered_set>
+#include <csignal>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <windows.h>
+#include <io.h>
+#else
+#include <unistd.h>
 #endif
 
 namespace {
-#ifdef _WIN32
 netcopy::client::Client* g_active_client = nullptr;
 
+#ifdef _WIN32
 BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
     if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT) {
         if (g_active_client != nullptr) {
@@ -32,7 +40,37 @@ BOOL WINAPI console_ctrl_handler(DWORD ctrl_type) {
     }
     return FALSE;
 }
+#else
+void signal_handler(int sig) {
+    if (sig == SIGINT || sig == SIGTERM) {
+        if (g_active_client != nullptr) {
+            g_active_client->request_cancel();
+        }
+    }
+}
 #endif
+
+enum class OverwriteStateEnum {
+    ASK,
+    OVERWRITE_ALL,
+    SKIP_ALL
+};
+
+struct OverwriteState {
+    std::mutex mutex;
+    OverwriteStateEnum state = OverwriteStateEnum::ASK;
+};
+
+struct ProgressState {
+    std::mutex mutex;
+    std::unordered_map<std::string, int> file_to_slot;
+    std::vector<bool> slot_occupied;
+    int max_slot_used = -1;
+    std::unordered_map<std::string, uint64_t> last_bytes_map;
+    std::vector<size_t> slot_line_lengths;
+    std::unordered_set<std::string> started_files;
+    std::unordered_set<std::string> completed_files;
+};
 }
 
 struct CommandLineArgs {
@@ -50,6 +88,8 @@ struct CommandLineArgs {
     bool auto_create_directories = true;
     bool auto_create_specified = false;
     netcopy::crypto::SecurityLevel security_level = netcopy::crypto::SecurityLevel::HIGH;
+    bool force = false;
+    bool version = false;
 };
 
 void print_usage(const char* program_name) {
@@ -70,13 +110,14 @@ void print_usage(const char* program_name) {
     std::cout << "  --no-empty-dirs            Don't create empty directories" << std::endl;
     std::cout << "  -s, --security LEVEL       Security level: high (default), fast, aes, or AES-256-GCM" << std::endl;
     std::cout << "  -g, --get, --download      Download/pull file/directory from server" << std::endl;
+    std::cout << "  -f, --force                Force replacing existing files/folders without prompting" << std::endl;
     std::cout << "  -v, --verbose              Enable verbose logging" << std::endl;
     std::cout << "  -h, --help                 Show this help message" << std::endl << std::endl;
     
     std::cout << "Destination formats (Source formats if downloading):" << std::endl;
     std::cout << "  server:port/path           e.g., 127.0.0.1:1245/D:/Work/" << std::endl;
+    std::cout << "  server:path                e.g., 127.0.0.1:D:\\Work\\          (port from config/default)" << std::endl;
     std::cout << "  server:/path               e.g., 127.0.0.1:/D:/Work/ (uses default/config port)" << std::endl;
-    std::cout << "  server:D:\\path             e.g., 127.0.0.1:D:\\Work\\ (Windows path)" << std::endl;
     std::cout << "  server                     e.g., 127.0.0.1 (uses default port and path)" << std::endl << std::endl;
     
     std::cout << "Examples:" << std::endl;
@@ -100,6 +141,9 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
         
         if (arg == "-h" || arg == "--help") {
             args.help = true;
+            return args;
+        } else if (arg == "--version") {
+            args.version = true;
             return args;
         } else if (arg == "-c" || arg == "--config") {
             if (i + 1 < argc) {
@@ -125,6 +169,8 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
             args.recursive = true;
         } else if (arg == "--resume") {
             args.resume = true;
+        } else if (arg == "-f" || arg == "--force") {
+            args.force = true;
         } else if (arg == "--auto-create") {
             args.auto_create_directories = true;
             args.auto_create_specified = true;
@@ -163,7 +209,7 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
     if (positional_args.size() == 2) {
         args.source_path = positional_args[0];
         args.destination_path = positional_args[1];
-    } else if (!args.help) {
+    } else if (!args.help && !args.version) {
         if (positional_args.empty()) {
             throw std::runtime_error("Missing source and destination arguments. Use -h for help.");
         } else if (positional_args.size() == 1) {
@@ -176,9 +222,14 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
     return args;
 }
 
-int main(int argc, char* argv[]) {
+int client_main(int argc, char* argv[]) {
     try {
         auto args = parse_arguments(argc, argv);
+        
+        if (args.version) {
+            std::cout << netcopy::common::get_version_string() << std::endl;
+            return 0;
+        }
         
         if (args.help) {
             print_usage(argv[0]);
@@ -331,58 +382,106 @@ int main(int argc, char* argv[]) {
         std::string path_to_parse = args.download ? args.source_path : args.destination_path;
         std::string local_path = args.download ? args.destination_path : args.source_path;
         
-        size_t colon_pos = path_to_parse.find(":");
-        if (colon_pos == std::string::npos) {
-            // Format: server_address (no port, no path)
-            server_address = path_to_parse;
-        } else {
-            server_address = path_to_parse.substr(0, colon_pos);
-            std::string after_colon = path_to_parse.substr(colon_pos + 1);
-            
-            if (after_colon.empty()) {
-                // Format: server_address: (empty after colon)
-                // Use default port and path
-            } else if (after_colon[0] == '/' || after_colon[0] == '\\' || 
-                      (after_colon.length() > 1 && after_colon[1] == ':')) {
-                // Format: server_address:/path or server_address:\path or server_address:C:\path
-                remote_path = after_colon;
-            } else {
-                // Check if it's a port number or path
-                // Look for path separator to determine where port ends
-                size_t slash_pos = after_colon.find_first_of("/\\");
-                size_t colon_pos_inner = after_colon.find(':');
-                
-                // Handle cases like "1245:D:/Work/" (invalid format)
-                if (colon_pos_inner != std::string::npos && colon_pos_inner < slash_pos) {
-                    std::cerr << "Error: Invalid remote format. Multiple colons detected." << std::endl;
-                    std::cerr << "Use: server:port/path  (e.g., 127.0.0.1:1245/D:/Work/)" << std::endl;
-                    std::cerr << "Or:  server:path       (e.g., 127.0.0.1:D:/Work/)" << std::endl;
-                    return 1;
-                }
-                
-                std::string potential_port = (slash_pos != std::string::npos) ? 
-                    after_colon.substr(0, slash_pos) : after_colon;
-                
-                // Try to parse as port number
-                if (server_port == 0) { // Only parse port if not provided via command line
-                    try {
-                        int port_int = std::stoi(potential_port);
-                        if (port_int >= 1 && port_int <= 65535) {
-                            server_port = static_cast<uint16_t>(port_int);
-                            if (slash_pos != std::string::npos) {
-                                remote_path = after_colon.substr(slash_pos);
+        if (!path_to_parse.empty() && path_to_parse.front() == '[') {
+            size_t close_bracket = path_to_parse.find(']');
+            if (close_bracket == std::string::npos) {
+                std::cerr << "Error: Invalid bracketed IPv6 destination. Missing ']'" << std::endl;
+                return 1;
+            }
+            server_address = path_to_parse.substr(1, close_bracket - 1);
+            std::string after_bracket = path_to_parse.substr(close_bracket + 1);
+            if (after_bracket.empty()) {
+                // Format: [::1] (uses default port and path)
+            } else if (after_bracket[0] == ':') {
+                std::string after_colon = after_bracket.substr(1);
+                if (after_colon.empty()) {
+                    // Format: [::1]:
+                    // Use default port and path
+                } else if (after_colon[0] == '/' || after_colon[0] == '\\' || 
+                           (after_colon.length() > 1 && after_colon[1] == ':')) {
+                    // Format: [::1]:/path or [::1]:D:/path
+                    remote_path = after_colon;
+                } else {
+                    size_t slash_pos = after_colon.find_first_of("/\\");
+                    std::string potential_port = (slash_pos != std::string::npos) ? 
+                        after_colon.substr(0, slash_pos) : after_colon;
+                    
+                    if (server_port == 0) {
+                        try {
+                            int port_int = std::stoi(potential_port);
+                            if (port_int >= 1 && port_int <= 65535) {
+                                server_port = static_cast<uint16_t>(port_int);
+                                if (slash_pos != std::string::npos) {
+                                    remote_path = after_colon.substr(slash_pos);
+                                }
+                            } else {
+                                remote_path = after_colon;
                             }
-                        } else {
-                            // Not a valid port, treat as path
+                        } catch (const std::exception&) {
                             remote_path = after_colon;
                         }
-                    } catch (const std::exception&) {
-                        // Not a number, treat as path
+                    } else {
                         remote_path = after_colon;
                     }
-                } else {
-                    // Port already specified via command line, treat as path
+                }
+            } else {
+                // Format: [::1]/path
+                remote_path = after_bracket;
+            }
+        } else {
+            size_t colon_pos = path_to_parse.find(":");
+            if (colon_pos == std::string::npos) {
+                // Format: server_address (no port, no path)
+                server_address = path_to_parse;
+            } else {
+                server_address = path_to_parse.substr(0, colon_pos);
+                std::string after_colon = path_to_parse.substr(colon_pos + 1);
+                
+                if (after_colon.empty()) {
+                    // Format: server_address: (empty after colon)
+                    // Use default port and path
+                } else if (after_colon[0] == '/' || after_colon[0] == '\\' || 
+                          (after_colon.length() > 1 && after_colon[1] == ':')) {
+                    // Format: server_address:/path or server_address:\path or server_address:C:\path
                     remote_path = after_colon;
+                } else {
+                    // Check if it's a port number or path
+                    // Look for path separator to determine where port ends
+                    size_t slash_pos = after_colon.find_first_of("/\\");
+                    size_t colon_pos_inner = after_colon.find(':');
+                    
+                    // Handle cases like "1245:D:/Work/" (invalid format)
+                    if (colon_pos_inner != std::string::npos && colon_pos_inner < slash_pos) {
+                        std::cerr << "Error: Invalid remote format. Multiple colons detected." << std::endl;
+                        std::cerr << "Use: server:port/path  (e.g., 127.0.0.1:1245/D:/Work/)" << std::endl;
+                        std::cerr << "Or:  server:path       (e.g., 127.0.0.1:D:/Work/)" << std::endl;
+                        return 1;
+                    }
+                    
+                    std::string potential_port = (slash_pos != std::string::npos) ? 
+                        after_colon.substr(0, slash_pos) : after_colon;
+                    
+                    // Try to parse as port number
+                    if (server_port == 0) { // Only parse port if not provided via command line
+                        try {
+                            int port_int = std::stoi(potential_port);
+                            if (port_int >= 1 && port_int <= 65535) {
+                                server_port = static_cast<uint16_t>(port_int);
+                                if (slash_pos != std::string::npos) {
+                                    remote_path = after_colon.substr(slash_pos);
+                                }
+                            } else {
+                                // Not a valid port, treat as path
+                                remote_path = after_colon;
+                            }
+                        } catch (const std::exception&) {
+                            // Not a number, treat as path
+                            remote_path = after_colon;
+                        }
+                    } else {
+                        // Port already specified via command line, treat as path
+                        remote_path = after_colon;
+                    }
                 }
             }
         }
@@ -462,62 +561,191 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
         g_active_client = &client;
         SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
+#else
+        g_active_client = &client;
+        std::signal(SIGINT, signal_handler);
+        std::signal(SIGTERM, signal_handler);
 #endif
+
+        bool use_ansi = false;
+#ifdef _WIN32
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (hOut != INVALID_HANDLE_VALUE) {
+            DWORD dwMode = 0;
+            if (GetConsoleMode(hOut, &dwMode)) {
+                dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+                if (SetConsoleMode(hOut, dwMode)) {
+                    use_ansi = true;
+                }
+            }
+        }
+#else
+        use_ansi = (isatty(fileno(stdout)) != 0);
+#endif
+
+        // Create overwrite state
+        auto overwrite_state = std::make_shared<OverwriteState>();
+        
+        client.set_overwrite_callback(static_cast<netcopy::client::Client::OverwriteCallback>([overwrite_state, args](const std::string& remote_path, uint64_t remote_size) {
+            if (args.force) {
+                return netcopy::client::Client::OverwriteDecision::OVERWRITE;
+            }
+            
+            std::lock_guard<std::mutex> lock(overwrite_state->mutex);
+            if (overwrite_state->state == OverwriteStateEnum::OVERWRITE_ALL) {
+                return netcopy::client::Client::OverwriteDecision::OVERWRITE;
+            }
+            if (overwrite_state->state == OverwriteStateEnum::SKIP_ALL) {
+                return netcopy::client::Client::OverwriteDecision::SKIP;
+            }
+            
+            std::cout << "\nFile already exists: " << remote_path << " (" << remote_size << " bytes)" << std::endl;
+            while (true) {
+                std::cout << "Overwrite? [y]es, [n]o, [a]ll, [s]kip all, [c]ancel: " << std::flush;
+                std::string response;
+                if (!std::getline(std::cin, response)) {
+                    return netcopy::client::Client::OverwriteDecision::CANCEL;
+                }
+                // Trim and convert to lower case
+                std::transform(response.begin(), response.end(), response.begin(), ::tolower);
+                if (response == "y" || response == "yes") {
+                    return netcopy::client::Client::OverwriteDecision::OVERWRITE;
+                } else if (response == "n" || response == "no") {
+                    return netcopy::client::Client::OverwriteDecision::SKIP;
+                } else if (response == "a" || response == "all") {
+                    overwrite_state->state = OverwriteStateEnum::OVERWRITE_ALL;
+                    return netcopy::client::Client::OverwriteDecision::OVERWRITE;
+                } else if (response == "s" || response == "skip all") {
+                    overwrite_state->state = OverwriteStateEnum::SKIP_ALL;
+                    return netcopy::client::Client::OverwriteDecision::SKIP;
+                } else if (response == "c" || response == "cancel") {
+                    return netcopy::client::Client::OverwriteDecision::CANCEL;
+                }
+            }
+        }));
 
         // Create bandwidth monitor
         auto bandwidth_monitor = std::make_shared<netcopy::common::BandwidthMonitor>();
-        uint64_t last_bytes = 0;
-        size_t last_line_length = 0;
         
-        client.set_progress_callback(static_cast<netcopy::client::Client::ProgressCallback>([bandwidth_monitor, &last_bytes, &last_line_length](uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file) {
-            if (total_bytes > 0) {
-                // Record only monotonic progress so parallel callbacks cannot
-                // move the cursor backward or corrupt the rate monitor.
-                uint64_t monotonic_bytes = bytes_transferred;
-                if (monotonic_bytes < last_bytes) {
-                    monotonic_bytes = last_bytes;
-                }
-                uint64_t new_bytes = monotonic_bytes - last_bytes;
-                if (new_bytes > 0) {
-                    bandwidth_monitor->record_bytes(new_bytes);
-                }
-                last_bytes = monotonic_bytes;
-                
-                double progress = static_cast<double>(monotonic_bytes) / total_bytes * 100.0;
-                std::string filename = netcopy::file::FileManager::get_filename(current_file);
-                
-                // Format file size in human readable format
-                auto format_size = [](uint64_t bytes) -> std::string {
-                    const char* units[] = {"B", "KB", "MB", "GB", "TB"};
-                    int unit = 0;
-                    double size = static_cast<double>(bytes);
-                    while (size >= 1024 && unit < 4) {
-                        size /= 1024;
-                        unit++;
-                    }
-                    char buffer[32];
-                    if (unit == 0) {
-                        snprintf(buffer, sizeof(buffer), "%.0f %s", size, units[unit]);
-                    } else {
-                        snprintf(buffer, sizeof(buffer), "%.1f %s", size, units[unit]);
-                    }
-                    return std::string(buffer);
-                };
-                
-                // Get current transfer rate
-                std::string rate_str = bandwidth_monitor->get_rate_string();
-                std::ostringstream line;
-                line << filename << ": " << std::fixed << std::setprecision(1) << progress << "% "
-                     << "(" << format_size(monotonic_bytes) << "/" << format_size(total_bytes) << ") "
-                     << "at " << rate_str;
+        auto state = std::make_shared<ProgressState>();
+        
+        client.set_progress_callback(static_cast<netcopy::client::Client::ProgressCallback>([bandwidth_monitor, state, use_ansi, args, &client, overwrite_state](uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file) {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            if (total_bytes == 0) return;
 
-                std::string output = line.str();
-                if (output.size() < last_line_length) {
-                    output.append(last_line_length - output.size(), ' ');
+            std::unique_lock<std::mutex> prompt_lock(overwrite_state->mutex, std::try_to_lock);
+            if (!prompt_lock.owns_lock()) {
+                // A prompt is currently active! Skip rendering progress to prevent screen corruption.
+                return;
+            }
+
+            // Track bandwidth
+            uint64_t prev_bytes = state->last_bytes_map[current_file];
+            uint64_t new_bytes = 0;
+            if (bytes_transferred > prev_bytes) {
+                new_bytes = bytes_transferred - prev_bytes;
+                state->last_bytes_map[current_file] = bytes_transferred;
+            }
+            if (new_bytes > 0) {
+                bandwidth_monitor->record_bytes(new_bytes);
+            }
+
+            std::string filename = netcopy::file::FileManager::get_filename(current_file);
+            double progress = static_cast<double>(bytes_transferred) / total_bytes * 100.0;
+
+            auto format_size = [](uint64_t bytes) -> std::string {
+                const char* units[] = {"B", "KB", "MB", "GB", "TB"};
+                int unit = 0;
+                double size = static_cast<double>(bytes);
+                while (size >= 1024 && unit < 4) {
+                    size /= 1024;
+                    unit++;
                 }
-                last_line_length = output.size();
-                
-                std::cout << "\r" << output << std::flush;
+                char buffer[32];
+                if (unit == 0) {
+                    snprintf(buffer, sizeof(buffer), "%.0f %s", size, units[unit]);
+                } else {
+                    snprintf(buffer, sizeof(buffer), "%.1f %s", size, units[unit]);
+                }
+                return std::string(buffer);
+            };
+
+            std::string rate_str = bandwidth_monitor->get_rate_string();
+            std::ostringstream line;
+            line << filename << ": " << std::fixed << std::setprecision(1) << progress << "% "
+                 << "(" << format_size(bytes_transferred) << "/" << format_size(total_bytes) << ") "
+                 << "at " << rate_str;
+            std::string output = line.str();
+
+            bool is_concurrent = args.recursive && !args.download && (client.get_negotiated_parallel_streams() > 1);
+
+            if (use_ansi) {
+                if (is_concurrent) {
+                    // Get or assign slot
+                    int slot = -1;
+                    auto it = state->file_to_slot.find(current_file);
+                    if (it != state->file_to_slot.end()) {
+                        slot = it->second;
+                    } else {
+                        // Find first unoccupied slot
+                        for (size_t i = 0; i < state->slot_occupied.size(); ++i) {
+                            if (!state->slot_occupied[i]) {
+                                slot = static_cast<int>(i);
+                                break;
+                            }
+                        }
+                        if (slot == -1) {
+                            slot = static_cast<int>(state->slot_occupied.size());
+                            state->slot_occupied.push_back(true);
+                            state->slot_line_lengths.push_back(0);
+                        } else {
+                            state->slot_occupied[slot] = true;
+                        }
+                        state->file_to_slot[current_file] = slot;
+                        
+                        // If we need to expand terminal lines
+                        if (slot > state->max_slot_used) {
+                            int lines_to_add = slot - state->max_slot_used;
+                            for (int l = 0; l < lines_to_add; ++l) {
+                                std::cout << "\n";
+                            }
+                            state->max_slot_used = slot;
+                        }
+                    }
+
+                    size_t prev_len = state->slot_line_lengths[slot];
+                    if (output.size() < prev_len) {
+                        output.append(prev_len - output.size(), ' ');
+                    }
+                    state->slot_line_lengths[slot] = output.size();
+
+                    // Draw to slot
+                    int N = state->max_slot_used + 1;
+                    int lines_up = N - slot;
+                    std::cout << "\033[" << lines_up << "A\r\033[K" << output << "\033[" << lines_up << "B\r" << std::flush;
+
+                    // If completed, release slot
+                    if (bytes_transferred >= total_bytes) {
+                        state->slot_occupied[slot] = false;
+                        state->file_to_slot.erase(current_file);
+                    }
+                } else {
+                    // Sequential with ANSI support
+                    std::cout << "\r\033[K" << output << std::flush;
+                    if (bytes_transferred >= total_bytes) {
+                        std::cout << "\n";
+                    }
+                }
+            } else {
+                // Non-ANSI fallback (e.g. redirected output, logs)
+                if (state->started_files.find(current_file) == state->started_files.end()) {
+                    std::cout << "Transferring " << filename << " (" << format_size(total_bytes) << ")..." << std::endl;
+                    state->started_files.insert(current_file);
+                }
+                if (bytes_transferred >= total_bytes && state->completed_files.find(current_file) == state->completed_files.end()) {
+                    std::cout << "Completed " << filename << " (" << format_size(total_bytes) << ") at " << rate_str << std::endl;
+                    state->completed_files.insert(current_file);
+                }
             }
         }));
 
@@ -587,3 +815,27 @@ int main(int argc, char* argv[]) {
     
     return 0;
 }
+
+#ifdef _WIN32
+int wmain(int argc, wchar_t* argv[]) {
+    // Enable UTF-8 console output
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
+
+    std::vector<std::string> utf8_args_storage;
+    std::vector<char*> utf8_argv;
+    utf8_args_storage.reserve(argc);
+    utf8_argv.reserve(argc);
+    for (int i = 0; i < argc; ++i) {
+        utf8_args_storage.push_back(std::filesystem::path(argv[i]).u8string());
+    }
+    for (int i = 0; i < argc; ++i) {
+        utf8_argv.push_back(const_cast<char*>(utf8_args_storage[i].c_str()));
+    }
+    return client_main(argc, utf8_argv.data());
+}
+#else
+int main(int argc, char* argv[]) {
+    return client_main(argc, argv);
+}
+#endif
