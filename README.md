@@ -159,76 +159,122 @@ Options:
 
 ### server.conf Reference
 
+The server configuration file (`server.conf`) is organized into sections. Below is the detailed reference of all available parameters, their meanings, default values, and possible values.
+
+#### `[network]`
+* **`listen_address`** (Default: `"0.0.0.0"`)
+  * **Meaning**: The local IP address on which the server listens for incoming connections.
+  * **Possible Values**: `0.0.0.0` (binds to all IPv4 interfaces), `127.0.0.1` (localhost only), any specific local interface IP, or `::` / `::1` for IPv6 dual-stack.
+* **`listen_port`** (Default: `1245`)
+  * **Meaning**: The TCP port on which the server listens.
+  * **Possible Values**: Any valid unused port number between `1` and `65535`.
+* **`max_connections`** (Default: `10`)
+  * **Meaning**: Maximum number of simultaneous active client connections.
+  * **Possible Values**: Any positive integer (e.g. `1` to `1000`).
+* **`timeout`** (Default: `30`)
+  * **Meaning**: Connection inactivity timeout in seconds. If a connection is idle with no packets for this duration, it is dropped.
+  * **Possible Values**: Any positive integer.
+
+#### `[security]`
+* **`secret_key`** (Default: `""`)
+  * **Meaning**: Hex-encoded key used for transport-layer encryption. If a user database is present and `require_auth` is enabled, this is still used for session key derivation.
+  * **Possible Values**: A 64-character hexadecimal string representing a 256-bit key, prefixed with `0x` (e.g. `0xebf5fa7d...`).
+* **`require_auth`** (Default: `true`)
+  * **Meaning**: Enforce user authentication against the user database (`users.csv`) for all connections.
+  * **Possible Values**: `true`, `false`.
+* **`max_file_size`** (Default: `0`)
+  * **Meaning**: The maximum file size (in bytes) the server will accept for transfer.
+  * **Possible Values**: `0` (unlimited size) or any positive 64-bit integer. For example, `1073741824` is 1 GB.
+
+#### `[performance]`
+* **`max_bandwidth_percent`** (Default: `0`)
+  * **Meaning**: Global server-side bandwidth throttle percentage based on detected link speed.
+  * **Possible Values**: `0` or `100` (unlimited, no throttle), or `1` through `99` (e.g. `50` restricts speeds to 50% of the adapter link speed).
+* **`max_chunk_size`** (Default: `10485760` / 10 MB)
+  * **Meaning**: Maximum size (in bytes) of data payload chunks the server will negotiate.
+  * **Possible Values**: Positive integers up to the protocol-enforced cap of `33554432` (32 MB).
+* **`socket_buffer_size`** (Default: `0`)
+  * **Meaning**: Explicit TCP socket send and receive buffer size in bytes.
+  * **Possible Values**: `0` (uses operating system default auto-tuning) or positive integers (e.g. `65536` for 64 KB, `1048576` for 1 MB).
+
+#### `[logging]`
+* **`log_level`** (Default: `"INFO"`)
+  * **Meaning**: Logger verbosity level.
+  * **Possible Values**: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`.
+* **`log_file`** (Default: `"server.log"`)
+  * **Meaning**: Path to the log file.
+  * **Possible Values**: Any valid writeable filepath, or `""` (empty) to disable logging to a file.
+* **`log_format`** (Default: `"text"`)
+  * **Meaning**: Formatting structure for log messages.
+  * **Possible Values**: `"text"` (standard readable logs) or `"json"` (structured JSON lines for aggregators).
+* **`audit_log`** (Default: `""`)
+  * **Meaning**: Path to the transfer audit log file which logs successes/failures.
+  * **Possible Values**: Any valid writeable filepath, or `""` (empty) to disable audit logging.
+* **`console_output`** (Default: `true`)
+  * **Meaning**: Replicate log outputs to the server terminal.
+  * **Possible Values**: `true`, `false`.
+
+#### `[daemon]`
+* **`run_as_daemon`** (Default: `false`)
+  * **Meaning**: Runs the server process in the background (Linux/Unix only).
+  * **Possible Values**: `true`, `false`.
+* **`pid_file`** (Default: `"/var/run/net_copy_server.pid"`)
+  * **Meaning**: Path to the daemon process ID file.
+  * **Possible Values**: Any valid writeable filepath.
+
+#### `[paths]`
+* **`allowed_paths`** (Default: `{"/var/lib/net_copy"}`)
+  * **Meaning**: List of directories allowed for client reads and writes. Can be specified multiple times.
+  * **Possible Values**: Absolute paths on the server.
+* **`auto_create_directories`** (Default: `true`)
+  * **Meaning**: Auto-create parent folders for incoming files if they do not exist.
+  * **Possible Values**: `true`, `false`.
+
+#### `[auth]`
+* **`users_file`** (Default: `"users.csv"`)
+  * **Meaning**: Path to the CSV file representing the user database.
+  * **Possible Values**: Any valid readable/writeable filepath.
+* **`allow_anonymous`** (Default: `false`)
+  * **Meaning**: Allow connections with no username even when the user database is loaded.
+  * **Possible Values**: `true`, `false`.
+
+#### Sample `server.conf` Template:
+
 ```ini
 [network]
-# IP address to listen on. 0.0.0.0 = all interfaces, 127.0.0.1 = localhost only.
 listen_address = 0.0.0.0
-# TCP port to listen on. Default: 1245.
 listen_port = 1245
-# Maximum simultaneous client connections.
 max_connections = 10
-# Seconds before an idle connection is dropped.
 timeout = 30
 
 [security]
-# Pre-shared hex key for transport encryption (legacy / fallback mode).
-# Generate with: net_copy_admin genkey
-# If users.csv is present and require_auth=true, user auth replaces this
-# for identity verification but the key is still used for transport encryption.
 secret_key = 0xebf5fa7d...
-# Require authentication from every client. Set false only for trusted LANs.
 require_auth = true
-# Maximum file size the server will accept, in bytes. 0 = unlimited.
-# 1073741824 = 1 GB
 max_file_size = 0
 
 [performance]
-# Bandwidth cap as % of detected link speed. 100 = unlimited.
-# Values 1-99 throttle the upload; 0 or 100 = no cap.
-max_bandwidth_percent = 100
-# Maximum chunk size in bytes the server will negotiate.
-# Clients use smaller chunks unless they grow via AIMD.
-# 910485760 = 868 MB (effectively unlimited — client caps at 32 MB anyway)
-max_chunk_size = 910485760
-# TCP socket buffer sizes in bytes (0 = OS default auto-tuning)
+max_bandwidth_percent = 0
+max_chunk_size = 10485760
 socket_buffer_size = 0
 
 [logging]
-# Log verbosity: DEBUG, INFO, WARNING, ERROR
 log_level = INFO
-# Path to log file. Leave empty to disable file logging.
 log_file = server.log
-# Log format: "text" (default) or "json" for structured log pipelines
 log_format = text
-# Path to append-only transfer audit log. Leave empty to disable.
 audit_log = audit.log
-# Print log lines to stdout (useful when not running as daemon).
 console_output = true
 
 [daemon]
-# Start as a background daemon on launch (Linux only).
 run_as_daemon = false
-# PID file for daemon mode.
 pid_file = /var/run/net_copy_server.pid
 
-[transfer]
-# Automatically create missing parent directories when a client writes a file.
-auto_create_directories = true
-# When transferring directories, also replicate empty subdirectories.
-create_empty_directories = true
-
 [paths]
-# One or more directories the server allows clients to write to.
-# Multiple entries are supported; use one line per path.
-# Clients cannot write outside these directories.
 allowed_paths = D:\Work\FILES
 allowed_paths = D:\Work\Backup
+auto_create_directories = true
 
 [auth]
-# Path to the user database CSV (relative to server executable, or absolute).
 users_file = users.csv
-# Allow connections with no username when users.csv is present.
-# Set true for a mixed setup: some clients use auth, others don't.
 allow_anonymous = false
 ```
 
@@ -294,39 +340,116 @@ For uploading, the `<destination>` is remote. For downloading (using `--get`), t
 
 ### client.conf Reference
 
+The client configuration file (`client.conf`) configures security, performance, connection, logging, and authentication parameters for client transfers. Below is the detailed reference of all available parameters.
+
+#### `[security]`
+* **`secret_key`** (Default: `""`)
+  * **Meaning**: Hex-encoded key used for transport-layer encryption. Must match the server's `secret_key`.
+  * **Possible Values**: A 64-character hexadecimal string representing a 256-bit key, prefixed with `0x`.
+
+#### `[performance]`
+* **`max_bandwidth_percent`** (Default: `0`)
+  * **Meaning**: Client-side upload bandwidth throttle percentage based on detected link speed.
+  * **Possible Values**: `0` or `100` (unlimited), or `1` through `99` (e.g. `25` restricts upload to 25% of the link speed).
+* **`retry_attempts`** (Default: `3`)
+  * **Meaning**: Number of times the client will attempt to reconnect and resume after transient network failures.
+  * **Possible Values**: `0` (disabled) or any positive integer.
+* **`retry_delay`** (Default: `5`)
+  * **Meaning**: Number of seconds to wait between retry attempts.
+  * **Possible Values**: Any positive integer.
+* **`socket_buffer_size`** (Default: `0`)
+  * **Meaning**: Explicit TCP socket send and receive buffer size in bytes.
+  * **Possible Values**: `0` (uses OS auto-tuning) or positive integers.
+* **`initial_chunk_size`** (Default: `262144` / 256 KB)
+  * **Meaning**: Initial size of data chunks in bytes when a transfer starts.
+  * **Possible Values**: Positive integers (e.g. `4096` to `33554432`).
+* **`min_chunk_size`** (Default: `8192` / 8 KB)
+  * **Meaning**: Minimum chunk size that the adaptive congestion control (AIMD) can scale down to.
+  * **Possible Values**: Positive integers.
+* **`max_chunk_size`** (Default: `10485760` / 10 MB)
+  * **Meaning**: Maximum chunk size that the AIMD algorithm can scale up to.
+  * **Possible Values**: Positive integers up to `33554432` (32 MB).
+* **`chunk_size_increase_factor`** (Default: `1.1`)
+  * **Meaning**: Multiplier used to grow chunk size after each successful chunk acknowledgment (Additive Increase).
+  * **Possible Values**: Floats greater than `1.0`.
+* **`chunk_size_decrease_factor`** (Default: `0.5`)
+  * **Meaning**: Multiplier used to shrink chunk size upon experiencing packets dropping or delays (Multiplicative Decrease).
+  * **Possible Values**: Floats between `0.0` and `1.0`.
+
+#### `[logging]`
+* **`log_level`** (Default: `"INFO"`)
+  * **Meaning**: Client log verbosity level.
+  * **Possible Values**: `"DEBUG"`, `"INFO"`, `"WARNING"`, `"ERROR"`.
+* **`log_file`** (Default: `"client.log"`)
+  * **Meaning**: Path to the client log file.
+  * **Possible Values**: Any valid writeable filepath, or `""` (empty) to disable logging to file.
+* **`log_format`** (Default: `"text"`)
+  * **Meaning**: Format style for logs.
+  * **Possible Values**: `"text"`, `"json"`.
+* **`console_output`** (Default: `true`)
+  * **Meaning**: Replicate log outputs to stdout/stderr in the terminal window.
+  * **Possible Values**: `true`, `false`.
+
+#### `[connection]`
+* **`timeout`** (Default: `30`)
+  * **Meaning**: Timeout in seconds for connection establishment and handshake. Once data transfer starts, this timeout is deactivated.
+  * **Possible Values**: Any positive integer.
+* **`keep_alive`** (Default: `true`)
+  * **Meaning**: Enable TCP keep-alive probes on the socket.
+  * **Possible Values**: `true`, `false`.
+
+#### `[transfer]`
+* **`auto_create_directories`** (Default: `true`)
+  * **Meaning**: Request the server to auto-create parent destination folders if missing.
+  * **Possible Values**: `true`, `false`.
+* **`create_empty_directories`** (Default: `true`)
+  * **Meaning**: Replicate empty subdirectories at the destination when doing recursive directory transfers.
+  * **Possible Values**: `true`, `false`.
+
+#### `[auth]`
+* **`username`** (Default: `""`)
+  * **Meaning**: Username for client authentication on the server.
+  * **Possible Values**: Registered usernames in the server's user database.
+* **`auth_method`** (Default: `"none"`)
+  * **Meaning**: Client authentication mechanism.
+  * **Possible Values**: `"none"`, `"password"`, `"mlkem"`.
+* **`password`** (Default: `""`)
+  * **Meaning**: Plaintext password for password authentication.
+  * **Possible Values**: Any string.
+* **`password_encrypted`** (Default: `""`)
+  * **Meaning**: Master passphrase encrypted password blob.
+  * **Possible Values**: Valid base64-encoded encrypted password blob produced by `net_copy_admin encrypt-password`.
+* **`private_key_file`** (Default: `""`)
+  * **Meaning**: Path to the client's ML-KEM private key file (PEM format).
+  * **Possible Values**: Valid filepath to a PEM key file.
+* **`private_key_passphrase`** (Default: `""`)
+  * **Meaning**: Passphrase to decrypt the private key file or `password_encrypted` blob. If omitted, the client will prompt you on startup.
+  * **Possible Values**: Any string.
+
+#### Sample `client.conf` Template:
+
 ```ini
 [security]
-# Must match the server's secret_key (transport encryption key).
-# Generate a key pair with: net_copy_admin genkey
 secret_key = 0xebf5fa7d...
 
 [performance]
-# Upload bandwidth cap as % of detected link speed.
-# 100 = unlimited. Values 1-99 throttle. 0 = also unlimited.
-max_bandwidth_percent = 100
-# Retry on transient errors.
+max_bandwidth_percent = 0
 retry_attempts = 3
-retry_delay = 5            # seconds between retries
-# TCP socket buffer sizes in bytes (0 = OS default auto-tuning)
+retry_delay = 5
 socket_buffer_size = 0
-
-# Chunk size tuning (AIMD — adapts automatically during transfer)
-initial_chunk_size = 262144    # 256 KB starting chunk size
-min_chunk_size = 8192          # 8 KB floor
-max_chunk_size = 910485760     # 868 MB ceiling (capped at 32 MB in practice)
-chunk_size_increase_factor = 1.1   # multiply chunk size after each successful ACK
-chunk_size_decrease_factor = 0.5   # halve chunk size after an error
+initial_chunk_size = 262144
+min_chunk_size = 8192
+max_chunk_size = 10485760
+chunk_size_increase_factor = 1.1
+chunk_size_decrease_factor = 0.5
 
 [logging]
-log_level = DEBUG     # DEBUG | INFO | WARNING | ERROR
+log_level = INFO
 log_file = client.log
-# Log format: "text" (default) or "json" for structured log pipelines
 log_format = text
 console_output = true
 
 [connection]
-# Seconds to wait for the initial connection and handshake.
-# Removed after handshake — data transfers never time out.
 timeout = 30
 keep_alive = true
 
@@ -335,13 +458,12 @@ auto_create_directories = true
 create_empty_directories = true
 
 [auth]
-# Uncomment and fill in to enable user authentication.
 # username = alice
-# auth_method = password          # password | mlkem | none
-# password = MySecret123          # for auth_method = password
-# password_encrypted =            # AES-CTR + HMAC-SHA3-256 encrypted password blob
-# private_key_file = id_mlkem768.pem   # for auth_method = mlkem
-# private_key_passphrase =        # leave empty if key file is not encrypted (or if decrypting password_encrypted with interactive prompt)
+# auth_method = password
+# password = MySecret123
+# password_encrypted = <encrypted-blob>
+# private_key_file = alice.pem
+# private_key_passphrase = KeyPass
 ```
 
 ---
