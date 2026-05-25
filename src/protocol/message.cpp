@@ -1,5 +1,6 @@
 #include "protocol/message.h"
 #include "exceptions.h"
+#include "common/fast_mem.h"
 #include <cstring>
 #include <sstream>
 
@@ -30,7 +31,11 @@ namespace {
     
     void write_bytes(std::vector<uint8_t>& buffer, const std::vector<uint8_t>& data) {
         write_uint32(buffer, static_cast<uint32_t>(data.size()));
-        buffer.insert(buffer.end(), data.begin(), data.end());
+        size_t old_size = buffer.size();
+        buffer.resize(old_size + data.size());
+        if (!data.empty()) {
+            fast_mem::fast_memcpy(buffer.data() + old_size, data.data(), data.size());
+        }
     }
     
     uint32_t read_uint32(const std::vector<uint8_t>& buffer, size_t& offset) {
@@ -70,7 +75,10 @@ namespace {
         if (offset + length > buffer.size()) {
             throw ProtocolException("Buffer underflow reading bytes");
         }
-        std::vector<uint8_t> data(buffer.begin() + offset, buffer.begin() + offset + length);
+        std::vector<uint8_t> data(length);
+        if (length > 0) {
+            fast_mem::fast_memcpy(data.data(), buffer.data() + offset, length);
+        }
         offset += length;
         return data;
     }
@@ -114,9 +122,15 @@ std::vector<uint8_t> Message::serialize() const {
     header.payload_length = static_cast<uint32_t>(payload.size());
     
     auto header_data = header.serialize();
-    header_data.insert(header_data.end(), payload.begin(), payload.end());
+    std::vector<uint8_t> buffer(header_data.size() + payload.size());
+    if (!header_data.empty()) {
+        fast_mem::fast_memcpy(buffer.data(), header_data.data(), header_data.size());
+    }
+    if (!payload.empty()) {
+        fast_mem::fast_memcpy(buffer.data() + header_data.size(), payload.data(), payload.size());
+    }
     
-    return header_data;
+    return buffer;
 }
 
 std::unique_ptr<Message> Message::deserialize(const std::vector<uint8_t>& data) {
@@ -191,6 +205,12 @@ std::unique_ptr<Message> Message::deserialize(const std::vector<uint8_t>& data) 
             break;
         case MessageType::BLOCK_HASHES_RESPONSE:
             message = std::make_unique<BlockHashesResponse>();
+            break;
+        case MessageType::TRANSFER_STATUS_REQUEST:
+            message = std::make_unique<TransferStatusRequest>();
+            break;
+        case MessageType::TRANSFER_STATUS_RESPONSE:
+            message = std::make_unique<TransferStatusResponse>();
             break;
         default:
             throw ProtocolException("Unknown message type");
@@ -381,6 +401,7 @@ std::vector<uint8_t> FileResponse::serialize_payload() const {
     write_string(buffer, error_message);
     write_uint64(buffer, file_size);
     write_uint64(buffer, resume_offset);
+    write_string(buffer, session_id);
     return buffer;
 }
 
@@ -393,6 +414,11 @@ void FileResponse::deserialize_payload(const std::vector<uint8_t>& data) {
     error_message = read_string(data, offset);
     file_size = read_uint64(data, offset);
     resume_offset = read_uint64(data, offset);
+    if (offset < data.size()) {
+        session_id = read_string(data, offset);
+    } else {
+        session_id = "";
+    }
 }
 
 // FileData implementation
@@ -602,17 +628,24 @@ void AuthResult::deserialize_payload(const std::vector<uint8_t>& data) {
 
 // DownloadRequest implementation
 DownloadRequest::DownloadRequest()
-    : Message(MessageType::DOWNLOAD_REQUEST) {}
+    : Message(MessageType::DOWNLOAD_REQUEST),
+      resume_offset(0) {}
 
 std::vector<uint8_t> DownloadRequest::serialize_payload() const {
     std::vector<uint8_t> buffer;
     write_string(buffer, remote_path);
+    write_uint64(buffer, resume_offset);
     return buffer;
 }
 
 void DownloadRequest::deserialize_payload(const std::vector<uint8_t>& data) {
     size_t offset = 0;
     remote_path = read_string(data, offset);
+    if (offset + 8 <= data.size()) {
+        resume_offset = read_uint64(data, offset);
+    } else {
+        resume_offset = 0;
+    }
 }
 
 // DownloadResponse implementation
@@ -633,6 +666,7 @@ std::vector<uint8_t> DownloadResponse::serialize_payload() const {
     write_uint32(buffer, permissions);
     buffer.push_back(is_symlink ? 1 : 0);
     write_string(buffer, symlink_target);
+    write_string(buffer, session_id);
     return buffer;
 }
 
@@ -660,6 +694,11 @@ void DownloadResponse::deserialize_payload(const std::vector<uint8_t>& data) {
         symlink_target = read_string(data, offset);
     } else {
         symlink_target = "";
+    }
+    if (offset < data.size()) {
+        session_id = read_string(data, offset);
+    } else {
+        session_id = "";
     }
 }
 
@@ -851,6 +890,48 @@ void BlockHashesResponse::deserialize_payload(const std::vector<uint8_t>& data) 
         block_size = 65536;
         blocks.clear();
     }
+}
+
+// TransferStatusRequest implementation
+TransferStatusRequest::TransferStatusRequest() : Message(MessageType::TRANSFER_STATUS_REQUEST) {}
+
+std::vector<uint8_t> TransferStatusRequest::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    write_string(buffer, session_id);
+    return buffer;
+}
+
+void TransferStatusRequest::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    session_id = read_string(data, offset);
+}
+
+// TransferStatusResponse implementation
+TransferStatusResponse::TransferStatusResponse() : Message(MessageType::TRANSFER_STATUS_RESPONSE) {}
+
+std::vector<uint8_t> TransferStatusResponse::serialize_payload() const {
+    std::vector<uint8_t> buffer;
+    buffer.push_back(success ? 1 : 0);
+    write_string(buffer, error_message);
+    buffer.push_back(active ? 1 : 0);
+    write_uint64(buffer, bytes_transferred);
+    write_uint64(buffer, total_bytes);
+    write_string(buffer, status_string);
+    write_string(buffer, logs);
+    return buffer;
+}
+
+void TransferStatusResponse::deserialize_payload(const std::vector<uint8_t>& data) {
+    size_t offset = 0;
+    if (offset >= data.size()) throw ProtocolException("TransferStatusResponse: missing success byte");
+    success = data[offset++] != 0;
+    error_message = read_string(data, offset);
+    if (offset >= data.size()) throw ProtocolException("TransferStatusResponse: missing active byte");
+    active = data[offset++] != 0;
+    bytes_transferred = read_uint64(data, offset);
+    total_bytes = read_uint64(data, offset);
+    status_string = read_string(data, offset);
+    logs = read_string(data, offset);
 }
 
 } // namespace protocol
