@@ -75,15 +75,39 @@ void ChunkSizeManager::adjust_chunk_size_based_on_success(const BandwidthMonitor
                                                          bool success,
                                                          uint64_t bytes_transferred) {
     auto now = std::chrono::steady_clock::now();
-    auto time_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now - last_update_time_).count();
     
-    // Calculate current throughput for this chunk
-    double current_throughput = 0.0;
-    if (time_elapsed > 0 && bytes_transferred > 0) {
-        current_throughput = static_cast<double>(bytes_transferred) / (time_elapsed / 1000.0);
+    if (!success) {
+        if (current_chunk_size_ > min_chunk_size_) {
+            size_t new_size = static_cast<size_t>(current_chunk_size_ * decrease_factor_);
+            current_chunk_size_ = std::max(new_size, min_chunk_size_);
+        }
+        // Reset measurement window
+        throughput_history_.clear();
+        throughput_history_.push_back({0, now});
+        return;
     }
-
+    
+    // Add to throughput history
+    throughput_history_.push_back({bytes_transferred, now});
+    
+    auto time_span_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        throughput_history_.back().second - throughput_history_.front().second).count();
+        
+    // Wait until we have at least 50ms of data to calculate stable throughput
+    if (time_span_ms < 50) {
+        return;
+    }
+    
+    // Calculate throughput over the window
+    uint64_t total_bytes = 0;
+    for (const auto& entry : throughput_history_) {
+        total_bytes += entry.first;
+    }
+    // The time span is from the END of the first chunk to the END of the last chunk.
+    // So the bytes transferred during this time span is total_bytes minus the first chunk.
+    total_bytes -= throughput_history_.front().first;
+    
+    double current_throughput = static_cast<double>(total_bytes) / (time_span_ms / 1000.0);
     double previous_throughput = smoothed_throughput_;
 
     // Update smoothed throughput using EMA
@@ -92,41 +116,25 @@ void ChunkSizeManager::adjust_chunk_size_based_on_success(const BandwidthMonitor
     } else {
         smoothed_throughput_ = (ema_alpha_ * current_throughput) + ((1.0 - ema_alpha_) * smoothed_throughput_);
     }
-
-    // Add to throughput history
-    throughput_history_.push_back({bytes_transferred, now});
     
-    // Keep only recent history (last 10 transfers)
-    if (throughput_history_.size() > 10) {
-        throughput_history_.pop_front();
-    }
+    // Start a new measurement window from now
+    throughput_history_.clear();
+    throughput_history_.push_back({0, now});
     
-    // Update time
-    last_update_time_ = now;
+    // Bandwidth-Delay Product (BDP) Proportional Controller:
+    // Target chunk transfer time is 50 milliseconds. 
+    // This provides smooth progress bars and responsive transfers while scaling flawlessly to any bandwidth.
+    constexpr double TARGET_CHUNK_TIME_SEC = 0.05;
     
-    // Adjust chunk size using bounded AIMD. ACKed chunks grow cautiously while
-    // failed or materially slower chunks back off quickly.
-    if (success && bytes_transferred > 0) {
-        if (throughput_history_.size() >= MIN_SUCCESS_COUNT) {
-            bool throughput_healthy = previous_throughput <= 0.0 ||
-                current_throughput <= 0.0 ||
-                current_throughput >= previous_throughput * 0.95;
-            if (throughput_healthy && current_chunk_size_ < max_chunk_size_) {
-                size_t new_size = static_cast<size_t>(current_chunk_size_ * increase_factor_);
-                current_chunk_size_ = std::min(new_size, max_chunk_size_);
-            } else if (current_throughput > 0.0 &&
-                       current_throughput < previous_throughput * 0.70 &&
-                       current_chunk_size_ > min_chunk_size_) {
-                size_t new_size = static_cast<size_t>(current_chunk_size_ * decrease_factor_);
-                current_chunk_size_ = std::max(new_size, min_chunk_size_);
-            }
-        }
-    } else {
-        if (current_chunk_size_ > min_chunk_size_) {
-            size_t new_size = static_cast<size_t>(current_chunk_size_ * decrease_factor_);
-            current_chunk_size_ = std::max(new_size, min_chunk_size_);
-        }
-    }
+    size_t ideal_chunk_size = static_cast<size_t>(smoothed_throughput_ * TARGET_CHUNK_TIME_SEC);
+    
+    // Apply a mild EMA to the chunk size itself to prevent micro-oscillations
+    current_chunk_size_ = static_cast<size_t>(
+        (0.7 * static_cast<double>(current_chunk_size_)) + (0.3 * static_cast<double>(ideal_chunk_size))
+    );
+    
+    // Clamp to negotiated limits
+    current_chunk_size_ = std::clamp(current_chunk_size_, min_chunk_size_, max_chunk_size_);
 }
 
 void ChunkSizeManager::adjust_chunk_size_based_on_throughput(const BandwidthMonitor& monitor) {
