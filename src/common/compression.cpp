@@ -1,4 +1,5 @@
 #include "common/compression.h"
+#include "common/fast_mem.h"
 #if __has_include(<lz4.h>)
 #include <lz4.h>
 #define HAS_LZ4
@@ -32,13 +33,17 @@ bool is_compressible(const std::string& path) {
 }
 
 std::vector<uint8_t> compress_buffer(const std::vector<uint8_t>& data) {
+    return compress_buffer(data.data(), data.size());
+}
+
+std::vector<uint8_t> compress_buffer(const uint8_t* data, size_t size) {
 #ifdef HAS_LZ4
-    int max_dst = LZ4_compressBound(static_cast<int>(data.size()));
+    int max_dst = LZ4_compressBound(static_cast<int>(size));
     std::vector<uint8_t> out(max_dst);
     int compressed_size = LZ4_compress_default(
-        reinterpret_cast<const char*>(data.data()),
+        reinterpret_cast<const char*>(data),
         reinterpret_cast<char*>(out.data()),
-        static_cast<int>(data.size()),
+        static_cast<int>(size),
         max_dst);
     if (compressed_size <= 0) {
         throw std::runtime_error("LZ4 compression failed");
@@ -46,17 +51,25 @@ std::vector<uint8_t> compress_buffer(const std::vector<uint8_t>& data) {
     out.resize(compressed_size);
     return out;
 #else
-    return data;
+    std::vector<uint8_t> copy(size);
+    if (size > 0) {
+        fast_mem::fast_memcpy(copy.data(), data, size);
+    }
+    return copy;
 #endif
 }
 
 std::vector<uint8_t> decompress_buffer(const std::vector<uint8_t>& data, size_t original_size) {
+    return decompress_buffer(data.data(), data.size(), original_size);
+}
+
+std::vector<uint8_t> decompress_buffer(const uint8_t* data, size_t size, size_t original_size) {
 #ifdef HAS_LZ4
     std::vector<uint8_t> out(original_size);
     int decompressed = LZ4_decompress_safe(
-        reinterpret_cast<const char*>(data.data()),
+        reinterpret_cast<const char*>(data),
         reinterpret_cast<char*>(out.data()),
-        static_cast<int>(data.size()),
+        static_cast<int>(size),
         static_cast<int>(original_size));
     if (decompressed < 0) {
         throw std::runtime_error("LZ4 decompression failed");
@@ -64,10 +77,14 @@ std::vector<uint8_t> decompress_buffer(const std::vector<uint8_t>& data, size_t 
     out.resize(decompressed);
     return out;
 #else
-    if (data.size() != original_size) {
+    if (size != original_size) {
          throw std::runtime_error("LZ4 decompression failed: LZ4 not available but data seems compressed");
     }
-    return data;
+    std::vector<uint8_t> copy(size);
+    if (size > 0) {
+        fast_mem::fast_memcpy(copy.data(), data, size);
+    }
+    return copy;
 #endif
 }
 
