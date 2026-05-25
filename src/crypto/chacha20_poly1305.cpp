@@ -1,5 +1,6 @@
 #include "crypto/chacha20_poly1305.h"
 #include "exceptions.h"
+#include "common/fast_mem.h"
 #include <random>
 #include <cstring>
 #include <algorithm>
@@ -215,7 +216,10 @@ std::vector<uint8_t> ChaCha20Poly1305::encrypt(const std::vector<uint8_t>& plain
     chacha_for_key.encrypt(poly_key, 32);
     
     // Encrypt plaintext
-    std::vector<uint8_t> ciphertext = plaintext;
+    std::vector<uint8_t> ciphertext(plaintext.size());
+    if (!plaintext.empty()) {
+        fast_mem::fast_memcpy(ciphertext.data(), plaintext.data(), plaintext.size());
+    }
     ChaCha20 chacha_for_data(pimpl_->key_, nonce, 1);
     chacha_for_data.encrypt(ciphertext.data(), ciphertext.size());
     
@@ -250,7 +254,10 @@ std::vector<uint8_t> ChaCha20Poly1305::decrypt(const std::vector<uint8_t>& ciphe
     }
     
     // Extract actual ciphertext (without tag)
-    std::vector<uint8_t> actual_ciphertext(ciphertext.begin(), ciphertext.end() - TAG_SIZE);
+    std::vector<uint8_t> actual_ciphertext(ciphertext.size() - TAG_SIZE);
+    if (!actual_ciphertext.empty()) {
+        fast_mem::fast_memcpy(actual_ciphertext.data(), ciphertext.data(), actual_ciphertext.size());
+    }
     
     // Generate Poly1305 key
     uint8_t poly_key[32] = {0};
@@ -277,7 +284,10 @@ std::vector<uint8_t> ChaCha20Poly1305::decrypt(const std::vector<uint8_t>& ciphe
     }
     
     // Decrypt
-    std::vector<uint8_t> plaintext = actual_ciphertext;
+    std::vector<uint8_t> plaintext(actual_ciphertext.size());
+    if (!actual_ciphertext.empty()) {
+        fast_mem::fast_memcpy(plaintext.data(), actual_ciphertext.data(), actual_ciphertext.size());
+    }
     ChaCha20 chacha_for_data(pimpl_->key_, nonce, 1);
     chacha_for_data.encrypt(plaintext.data(), plaintext.size());
     
