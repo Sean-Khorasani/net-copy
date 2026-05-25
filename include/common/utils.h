@@ -49,6 +49,9 @@ std::vector<uint8_t> derive_session_key(
 std::string get_version_string();
 std::string get_build_info();
 
+// Command-line preprocessing for Windows escaping quirks
+std::vector<std::string> preprocess_arguments(int argc, char* argv[]);
+
 } // namespace common
 } // namespace netcopy
 
