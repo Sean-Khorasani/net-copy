@@ -349,6 +349,47 @@ std::vector<uint8_t> derive_session_key(
     return crypto::sha3_256(material);
 }
 
+std::vector<std::string> preprocess_arguments(int argc, char* argv[]) {
+    std::vector<std::string> args;
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        
+        // Check if the argument contains a double quote character in the middle
+        size_t quote_pos = arg.find('"');
+        if (quote_pos != std::string::npos) {
+            // Split it: before the quote is the path
+            std::string before = arg.substr(0, quote_pos);
+            if (!before.empty()) {
+                args.push_back(before);
+            }
+            
+            // The rest is after the quote
+            std::string after = arg.substr(quote_pos + 1);
+            std::string current_token;
+            bool in_quotes = false;
+            for (size_t j = 0; j < after.length(); ++j) {
+                char c = after[j];
+                if (c == '"') {
+                    in_quotes = !in_quotes;
+                } else if (std::isspace(static_cast<unsigned char>(c)) && !in_quotes) {
+                    if (!current_token.empty()) {
+                        args.push_back(current_token);
+                        current_token.clear();
+                    }
+                } else {
+                    current_token += c;
+                }
+            }
+            if (!current_token.empty()) {
+                args.push_back(current_token);
+            }
+        } else {
+            args.push_back(arg);
+        }
+    }
+    return args;
+}
+
 } // namespace common
 } // namespace netcopy
 
