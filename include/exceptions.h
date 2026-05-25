@@ -57,5 +57,12 @@ public:
         : NetCopyException("Auth error: " + message) {}
 };
 
+// File skipped exception
+class FileSkippedException : public NetCopyException {
+public:
+    explicit FileSkippedException(const std::string& message)
+        : NetCopyException("File skipped: " + message) {}
+};
+
 } // namespace netcopy
 
