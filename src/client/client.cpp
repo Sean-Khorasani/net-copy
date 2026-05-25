@@ -1,4 +1,5 @@
 #include "client/client.h"
+#include "common/fast_mem.h"
 #include "common/compression.h"
 #include "common/utils.h"
 #include "exceptions.h"
@@ -135,7 +136,39 @@ void Client::disconnect() {
 }
 
 bool Client::is_connected() const {
-    return connected_;
+    if (!connected_ || !socket_ || !socket_->is_valid()) {
+        return false;
+    }
+    
+    // Perform a non-blocking check to see if the server closed the socket
+    socket_t fd = socket_->native_handle();
+    fd_set rfd;
+    FD_ZERO(&rfd);
+    FD_SET(fd, &rfd);
+    
+    timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    
+    int select_result = select(static_cast<int>(fd + 1), &rfd, nullptr, nullptr, &tv);
+    if (select_result > 0) {
+        char buf[1];
+#ifdef _WIN32
+        int recv_result = recv(fd, buf, 1, MSG_PEEK);
+#else
+        int recv_result = recv(fd, buf, 1, MSG_PEEK | MSG_DONTWAIT);
+#endif
+        if (recv_result <= 0) {
+            // EOF or error
+            const_cast<Client*>(this)->connected_ = false;
+            return false;
+        }
+    } else if (select_result < 0) {
+        const_cast<Client*>(this)->connected_ = false;
+        return false;
+    }
+    
+    return true;
 }
 
 void Client::set_security_level(crypto::SecurityLevel level) {
@@ -172,13 +205,34 @@ void Client::transfer_directory(const std::string& local_path,
     };
     std::vector<FileTransferTask> file_tasks;
     
+    // Normalize local_path using filesystem path
+    std::filesystem::path p_local = std::filesystem::u8path(local_path).lexically_normal();
+    std::string norm_local = p_local.u8string();
+    while (!norm_local.empty() && (norm_local.back() == '/' || norm_local.back() == '\\')) {
+        norm_local.pop_back();
+    }
+    std::string norm_local_cmp = norm_local;
+#ifdef _WIN32
+    // Windows is case-insensitive
+    std::transform(norm_local_cmp.begin(), norm_local_cmp.end(), norm_local_cmp.begin(), ::tolower);
+#endif
+
+    std::vector<std::pair<std::string, uint64_t>> files_to_report;
+
     for (const auto& entry : files) {
+        std::filesystem::path p_entry = std::filesystem::u8path(entry.path).lexically_normal();
+        std::string norm_entry = p_entry.u8string();
+        std::string norm_entry_cmp = norm_entry;
+#ifdef _WIN32
+        std::transform(norm_entry_cmp.begin(), norm_entry_cmp.end(), norm_entry_cmp.begin(), ::tolower);
+#endif
+
         std::string relative = entry.path;
-        if (relative.find(local_path) == 0) {
-            relative = relative.substr(local_path.length());
-            while (!relative.empty() && (relative.front() == '/' || relative.front() == '\\')) {
-                relative.erase(relative.begin());
-            }
+        if (norm_entry_cmp.rfind(norm_local_cmp, 0) == 0) {
+            relative = norm_entry.substr(norm_local.length());
+        }
+        while (!relative.empty() && (relative.front() == '/' || relative.front() == '\\')) {
+            relative.erase(relative.begin());
         }
 
         std::string destination = file::FileManager::join_path(remote_path, common::convert_to_unix_path(relative));
@@ -191,7 +245,12 @@ void Client::transfer_directory(const std::string& local_path,
             }
         } else {
             file_tasks.push_back({entry.path, destination});
+            files_to_report.push_back({entry.path, entry.size});
         }
+    }
+    
+    if (file_list_callback_) {
+        file_list_callback_(files_to_report);
     }
     
     if (file_tasks.empty()) {
@@ -202,7 +261,13 @@ void Client::transfer_directory(const std::string& local_path,
     if (max_threads <= 1 || file_tasks.size() <= 1) {
         // Sequential transfer
         for (const auto& task : file_tasks) {
-            transfer_single_file(task.local_path, task.remote_path, resume);
+            try {
+                transfer_single_file(task.local_path, task.remote_path, resume);
+            } catch (const FileSkippedException& e) {
+                LOG_INFO("File skipped: " + task.local_path);
+                disconnect();
+                connect(server_address_, server_port_);
+            }
         }
         return;
     }
@@ -238,6 +303,7 @@ void Client::transfer_directory(const std::string& local_path,
             stream_client.bandwidth_limiter_ = bandwidth_limiter_;
             stream_client.set_progress_callback(safe_progress_callback); // Propagate progress callback safely
             stream_client.set_overwrite_callback(overwrite_callback_);
+            stream_client.parent_client_ = this;
             
             {
                 std::lock_guard<std::mutex> lock(workers_mutex_);
@@ -276,7 +342,13 @@ void Client::transfer_directory(const std::string& local_path,
                 }
                 
                 const auto& task = file_tasks[idx];
-                stream_client.transfer_single_file(task.local_path, task.remote_path, resume);
+                try {
+                    stream_client.transfer_single_file(task.local_path, task.remote_path, resume);
+                } catch (const FileSkippedException& e) {
+                    LOG_INFO("File skipped: " + task.local_path);
+                    stream_client.disconnect();
+                    stream_client.connect(server_address_, server_port_);
+                }
             }
         } catch (...) {
             record_error(std::current_exception());
@@ -306,6 +378,73 @@ void Client::set_progress_callback(ProgressCallback callback) {
 
 void Client::set_overwrite_callback(OverwriteCallback callback) {
     overwrite_callback_ = std::move(callback);
+}
+
+static std::string normalize_control_path(const std::string& path) {
+    std::string norm = path;
+    std::replace(norm.begin(), norm.end(), '\\', '/');
+    for (auto& c : norm) {
+        c = std::tolower(static_cast<unsigned char>(c));
+    }
+    return norm;
+}
+
+void Client::set_file_list_callback(FileListCallback callback) {
+    file_list_callback_ = std::move(callback);
+}
+
+void Client::pause_file(const std::string& path) {
+    std::lock_guard<std::mutex> lock(control_mutex_);
+    paused_files_[normalize_control_path(path)] = true;
+    LOG_INFO("Paused file: " + path);
+}
+
+void Client::resume_file(const std::string& path) {
+    std::lock_guard<std::mutex> lock(control_mutex_);
+    paused_files_[normalize_control_path(path)] = false;
+    LOG_INFO("Resumed file: " + path);
+}
+
+void Client::skip_file(const std::string& path) {
+    std::lock_guard<std::mutex> lock(control_mutex_);
+    skipped_files_[normalize_control_path(path)] = true;
+    LOG_INFO("Skipped file: " + path);
+}
+
+bool Client::is_file_paused(const std::string& path) {
+    if (parent_client_) {
+        return parent_client_->is_file_paused(path);
+    }
+    std::lock_guard<std::mutex> lock(control_mutex_);
+    auto it = paused_files_.find(normalize_control_path(path));
+    return (it != paused_files_.end()) && it->second;
+}
+
+bool Client::is_file_skipped(const std::string& path) {
+    if (parent_client_) {
+        return parent_client_->is_file_skipped(path);
+    }
+    std::lock_guard<std::mutex> lock(control_mutex_);
+    auto it = skipped_files_.find(normalize_control_path(path));
+    return (it != skipped_files_.end()) && it->second;
+}
+
+protocol::TransferStatusResponse Client::query_transfer_status(const std::string& session_id) {
+    if (!connected_) {
+        throw ProtocolException("Client is not connected");
+    }
+    
+    protocol::TransferStatusRequest request;
+    request.session_id = session_id;
+    send_message(request);
+    
+    auto response_msg = receive_message();
+    auto response = dynamic_cast<protocol::TransferStatusResponse*>(response_msg.get());
+    if (!response) {
+        throw ProtocolException("Invalid response to transfer status request");
+    }
+    
+    return *response;
 }
 
 std::string Client::get_last_error() const {
@@ -492,6 +631,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         throw FileException("Resume offset is larger than source file");
     }
 
+    bool do_delta_sync = true;
     if (!is_sym && remote_file_size > 0 && !resume) {
         if (overwrite_callback_) {
             auto decision = overwrite_callback_(remote_path, remote_file_size);
@@ -504,9 +644,15 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
             } else if (decision == OverwriteDecision::CANCEL) {
                 request_cancel();
                 throw FileException("Transfer cancelled by user");
+            } else if (decision == OverwriteDecision::OVERWRITE) {
+                do_delta_sync = false;
+            } else if (decision == OverwriteDecision::DELTA_SYNC) {
+                do_delta_sync = true;
             }
         }
-        LOG_INFO("Remote file exists (size " + std::to_string(remote_file_size) + " bytes). Performing delta sync for " + local_path);
+        
+        if (do_delta_sync) {
+            LOG_INFO("Remote file exists (size " + std::to_string(remote_file_size) + " bytes). Performing delta sync for " + local_path);
         
         // 1. Send BlockHashesRequest
         protocol::BlockHashesRequest req;
@@ -629,7 +775,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         }
         
         // E2E Integrity verification
-        if (total_size > 0) {
+        if (total_size > 0 && !merged_diffs.empty()) {
             LOG_INFO("Performing E2E integrity check for: " + local_path);
             auto local_hash = file::FileManager::compute_file_hash(local_path);
             
@@ -653,6 +799,23 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         }
         
         return; // Done with delta sync!
+        }
+    }
+
+    if (!is_sym && remote_file_size > 0 && !resume && !do_delta_sync) {
+        // Send a 0-byte chunk to force the server to safely truncate the file before multiple streams write to it
+        protocol::FileData data_msg;
+        data_msg.offset = 0;
+        data_msg.uncompressed_size = 0;
+        data_msg.is_last_chunk = false;
+        data_msg.compressed = false;
+        send_message(data_msg);
+        
+        auto ack_msg = receive_message();
+        auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
+        if (!ack || !ack->success) {
+            throw FileException("Failed to truncate remote file: " + (ack ? ack->error_message : "Unknown error"));
+        }
     }
 
     bandwidth_monitor_.reset();
@@ -715,6 +878,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
             stream_client.set_requested_parallel_streams(1);
             stream_client.set_buffer_pool(buffer_pool_); // Propagate buffer pool
             stream_client.bandwidth_limiter_ = bandwidth_limiter_;
+            stream_client.parent_client_ = this;
             
             {
                 std::lock_guard<std::mutex> lock(workers_mutex_);
@@ -870,6 +1034,11 @@ void Client::send_file_request(const std::string& local_path,
     if (!response) {
         throw ProtocolException("Invalid file response");
     }
+    session_id_ = response->session_id;
+    if (parent_client_) {
+        std::lock_guard<std::mutex> lock(parent_client_->control_mutex_);
+        parent_client_->session_id_ = response->session_id;
+    }
     if (!response->success) {
         throw FileException(response->error_message);
     }
@@ -985,6 +1154,7 @@ void Client::send_file_range(const std::string& file_path,
     // Background disk read-ahead thread
     ReadAheadQueue read_queue(4); // Keep at most 4 chunks pre-read in memory
     std::atomic<bool> reader_failed(false);
+    std::atomic<bool> is_skipped_error(false);
     std::string reader_error;
     
     std::thread reader_thread([&]() {
@@ -996,6 +1166,12 @@ void Client::send_file_range(const std::string& file_path,
             
             uint64_t current_read_offset = start_offset;
             while (current_read_offset < end_offset && !cancel_requested_ && !ack_thread_failed.load()) {
+                while (is_file_paused(file_path) && !is_file_skipped(file_path) && !cancel_requested_ && !ack_thread_failed.load()) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                }
+                if (is_file_skipped(file_path)) {
+                    throw FileSkippedException("File skip requested by client: " + file_path);
+                }
                 size_t chunk_size = shared_chunk_manager.get_optimal_chunk_size(shared_bandwidth_monitor);
                 // Cap chunk size so it always fits inside the flow-control window;
                 // without this cap the window condition can never become true → deadlock.
@@ -1024,6 +1200,11 @@ void Client::send_file_range(const std::string& file_path,
                 current_read_offset += bytes_read;
             }
             read_queue.set_finished();
+        } catch (const FileSkippedException& e) {
+            reader_error = e.what();
+            is_skipped_error = true;
+            reader_failed = true;
+            read_queue.set_finished();
         } catch (const std::exception& e) {
             reader_error = e.what();
             reader_failed = true;
@@ -1039,6 +1220,7 @@ void Client::send_file_range(const std::string& file_path,
     
     try {
         ReadAheadChunk current_chunk;
+        protocol::FileData data_msg;
         while (read_queue.pop(current_chunk)) {
             if (cancel_requested_) {
                 throw FileException("Transfer cancelled");
@@ -1064,27 +1246,30 @@ void Client::send_file_range(const std::string& file_path,
             }
             
             // Build FILE_DATA message
-            protocol::FileData data_msg;
             data_msg.offset = current_chunk.offset;
             data_msg.uncompressed_size = current_chunk.data->size();
             
-            std::vector<uint8_t> final_data;
             if (compress) {
-                auto compressed_data = common::compress_buffer(*current_chunk.data);
+                auto compressed_data = common::compress_buffer(current_chunk.data->data(), current_chunk.data->size());
                 if (compressed_data.size() < current_chunk.data->size() &&
                     compressed_data.size() <= negotiated_max_chunk_size_) {
-                    final_data = std::move(compressed_data);
+                    data_msg.data = std::move(compressed_data);
                     data_msg.compressed = true;
                 } else {
-                    final_data = *current_chunk.data;
+                    data_msg.data.resize(current_chunk.data->size());
+                    if (!current_chunk.data->empty()) {
+                        fast_mem::fast_memcpy(data_msg.data.data(), current_chunk.data->data(), current_chunk.data->size());
+                    }
                     data_msg.compressed = false;
                 }
             } else {
-                final_data = *current_chunk.data;
+                data_msg.data.resize(current_chunk.data->size());
+                if (!current_chunk.data->empty()) {
+                    fast_mem::fast_memcpy(data_msg.data.data(), current_chunk.data->data(), current_chunk.data->size());
+                }
                 data_msg.compressed = false;
             }
             
-            data_msg.data = std::move(final_data);
             data_msg.is_last_chunk = current_chunk.is_last;
             
             // Record in-flight details before writing to socket
@@ -1139,6 +1324,9 @@ void Client::send_file_range(const std::string& file_path,
     }
     
     if (reader_failed.load()) {
+        if (is_skipped_error.load()) {
+            throw FileSkippedException(reader_error);
+        }
         throw FileException("Reader thread failed: " + reader_error);
     }
     if (ack_thread_failed.load()) {
@@ -1201,6 +1389,22 @@ void Client::request_cancel() {
     }
 }
 
+void Client::register_worker(Client* worker) {
+    std::lock_guard<std::mutex> lock(workers_mutex_);
+    if (cancel_requested_) {
+        worker->request_cancel();
+    }
+    active_workers_.push_back(worker);
+}
+
+void Client::unregister_worker(Client* worker) {
+    std::lock_guard<std::mutex> lock(workers_mutex_);
+    auto it = std::find(active_workers_.begin(), active_workers_.end(), worker);
+    if (it != active_workers_.end()) {
+        active_workers_.erase(it);
+    }
+}
+
 void Client::clear_error() {
     last_error_.clear();
 }
@@ -1209,19 +1413,31 @@ uint32_t Client::get_next_sequence_number() {
     return sequence_number_++;
 }
 
-void Client::download_file(const std::string& remote_path, const std::string& local_path) {
+void Client::download_file(const std::string& remote_path, const std::string& local_path, bool resume) {
     if (!socket_) {
         throw NetworkException("Socket is not connected");
     }
 
     protocol::DownloadRequest request;
     request.remote_path = remote_path;
+    
+    uint64_t resume_offset = 0;
+    if (resume && std::filesystem::exists(std::filesystem::u8path(local_path))) {
+        resume_offset = std::filesystem::file_size(std::filesystem::u8path(local_path));
+    }
+    request.resume_offset = resume_offset;
+
     send_message(request);
 
     auto response_msg = receive_message();
     auto response = dynamic_cast<protocol::DownloadResponse*>(response_msg.get());
     if (!response) {
         throw ProtocolException("Expected DownloadResponse");
+    }
+    session_id_ = response->session_id;
+    if (parent_client_) {
+        std::lock_guard<std::mutex> lock(parent_client_->control_mutex_);
+        parent_client_->session_id_ = response->session_id;
     }
 
     if (!response->success) {
@@ -1274,16 +1490,29 @@ void Client::download_file(const std::string& remote_path, const std::string& lo
         return;
     }
 
+    if (is_file_skipped(remote_path)) {
+        throw FileSkippedException("File skip requested by client");
+    }
+
     // Open local file
     file::FileStream fs;
-    if (!fs.open_write(local_path)) {
+    if (!fs.open_write(local_path, !resume)) {
         throw FileException("Failed to open local file for writing: " + local_path);
     }
 
     uint64_t total_bytes = response->file_size;
-    uint64_t bytes_received = 0;
+    uint64_t bytes_received = resume_offset;
 
     while (bytes_received < total_bytes) {
+        while (is_file_paused(remote_path) && !is_file_skipped(remote_path) && !cancel_requested_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        if (is_file_skipped(remote_path)) {
+            disconnect();
+            throw FileSkippedException("File skip requested by client");
+        }
+
         auto msg = receive_message();
         auto file_data = dynamic_cast<protocol::FileData*>(msg.get());
         if (!file_data) {
@@ -1370,12 +1599,43 @@ std::vector<protocol::RemoteFileInfo> Client::list_remote_directory(const std::s
     return response->entries;
 }
 
-void Client::download_directory(const std::string& remote_path, const std::string& local_path, bool recursive) {
+void Client::download_directory(const std::string& remote_path, const std::string& local_path, bool recursive, bool resume) {
     auto entries = list_remote_directory(remote_path, recursive);
+    
+    std::vector<std::pair<std::string, uint64_t>> files_to_report;
     for (const auto& entry : entries) {
+        if (!entry.is_directory) {
+            files_to_report.push_back({entry.path, entry.size});
+        }
+    }
+    
+    if (file_list_callback_) {
+        file_list_callback_(files_to_report);
+    }
+    
+    // Normalize remote_path using filesystem path
+    std::filesystem::path p_remote = std::filesystem::u8path(remote_path).lexically_normal();
+    std::string norm_remote = p_remote.u8string();
+    while (!norm_remote.empty() && (norm_remote.back() == '/' || norm_remote.back() == '\\')) {
+        norm_remote.pop_back();
+    }
+    std::string norm_remote_cmp = norm_remote;
+#ifdef _WIN32
+    // Windows is case-insensitive
+    std::transform(norm_remote_cmp.begin(), norm_remote_cmp.end(), norm_remote_cmp.begin(), ::tolower);
+#endif
+
+    for (const auto& entry : entries) {
+        std::filesystem::path p_entry = std::filesystem::u8path(entry.path).lexically_normal();
+        std::string norm_entry = p_entry.u8string();
+        std::string norm_entry_cmp = norm_entry;
+#ifdef _WIN32
+        std::transform(norm_entry_cmp.begin(), norm_entry_cmp.end(), norm_entry_cmp.begin(), ::tolower);
+#endif
+
         std::string rel_path = entry.path;
-        if (rel_path.rfind(remote_path, 0) == 0) {
-            rel_path = rel_path.substr(remote_path.length());
+        if (norm_entry_cmp.rfind(norm_remote_cmp, 0) == 0) {
+            rel_path = norm_entry.substr(norm_remote.length());
         }
         while (!rel_path.empty() && (rel_path[0] == '/' || rel_path[0] == '\\')) {
             rel_path = rel_path.substr(1);
@@ -1390,7 +1650,15 @@ void Client::download_directory(const std::string& remote_path, const std::strin
             if (!parent_dir.empty()) {
                 file::FileManager::create_directories(parent_dir);
             }
-            download_file(entry.path, full_local);
+            try {
+                download_file(entry.path, full_local, resume);
+            } catch (const FileSkippedException& e) {
+                LOG_INFO("File skipped: " + entry.path);
+                std::error_code ec;
+                std::filesystem::remove(full_local, ec);
+                disconnect();
+                connect(server_address_, server_port_);
+            }
         }
     }
 }
