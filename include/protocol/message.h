@@ -33,7 +33,9 @@ enum class MessageType : uint32_t {
     FILE_VERIFY_RESPONSE = 21,
     DISCONNECT = 22,
     BLOCK_HASHES_REQUEST = 23,
-    BLOCK_HASHES_RESPONSE = 24
+    BLOCK_HASHES_RESPONSE = 24,
+    TRANSFER_STATUS_REQUEST = 25,
+    TRANSFER_STATUS_RESPONSE = 26
 };
 
 struct MessageHeader {
@@ -129,6 +131,7 @@ public:
     std::string error_message;
     uint64_t file_size;
     uint64_t resume_offset;
+    std::string session_id;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -277,6 +280,7 @@ public:
     DownloadRequest();
     
     std::string remote_path;
+    uint64_t resume_offset = 0;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -295,6 +299,7 @@ public:
     uint32_t permissions = 0;
     bool is_symlink = false;
     std::string symlink_target;
+    std::string session_id;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -378,6 +383,32 @@ public:
     std::string error_message;
     uint64_t block_size;
     std::vector<BlockHashInfo> blocks;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class TransferStatusRequest : public Message {
+public:
+    TransferStatusRequest();
+    
+    std::string session_id;
+    
+    std::vector<uint8_t> serialize_payload() const override;
+    void deserialize_payload(const std::vector<uint8_t>& data) override;
+};
+
+class TransferStatusResponse : public Message {
+public:
+    TransferStatusResponse();
+    
+    bool success;
+    std::string error_message;
+    bool active;
+    uint64_t bytes_transferred;
+    uint64_t total_bytes;
+    std::string status_string;
+    std::string logs;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
