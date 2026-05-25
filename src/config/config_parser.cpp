@@ -248,6 +248,14 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
     
     config.allowed_paths = parser.get_string_list("paths", "allowed_paths", {"/var/lib/net_copy"});
     for (auto& p : config.allowed_paths) {
+        // Trim leading and trailing whitespace, single/double quotes
+        size_t start = p.find_first_not_of(" \t\r\n\"'");
+        size_t end = p.find_last_not_of(" \t\r\n\"'");
+        if (start != std::string::npos && end != std::string::npos) {
+            p = p.substr(start, end - start + 1);
+        } else {
+            p = "";
+        }
         p = common::convert_to_native_path(p);
     }
     config.auto_create_directories = parser.get_bool("paths", "auto_create_directories", true);
