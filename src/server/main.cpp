@@ -115,11 +115,11 @@ bool parse_listen_address(const std::string& listen_arg, std::string& address, u
     }
 }
 
-CommandLineArgs parse_arguments(int argc, char* argv[]) {
+CommandLineArgs parse_arguments(const std::vector<std::string>& arg_list) {
     CommandLineArgs args;
     
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    for (size_t i = 0; i < arg_list.size(); ++i) {
+        std::string arg = arg_list[i];
         
         if (arg == "-h" || arg == "--help") {
             args.help = true;
@@ -128,8 +128,8 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
             args.version = true;
             return args;
         } else if (arg == "-l" || arg == "--listen") {
-            if (i + 1 < argc) {
-                std::string listen_arg = argv[++i];
+            if (i + 1 < arg_list.size()) {
+                std::string listen_arg = arg_list[++i];
                 if (!parse_listen_address(listen_arg, args.listen_address, args.listen_port)) {
                     throw std::runtime_error("Invalid listen address format. Use ADDRESS:PORT");
                 }
@@ -137,14 +137,14 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
                 throw std::runtime_error("Missing listen address argument");
             }
         } else if (arg == "-a" || arg == "--access") {
-            if (i + 1 < argc) {
-                args.access_path = argv[++i];
+            if (i + 1 < arg_list.size()) {
+                args.access_path = arg_list[++i];
             } else {
                 throw std::runtime_error("Missing access path argument");
             }
         } else if (arg == "-c" || arg == "--config") {
-            if (i + 1 < argc) {
-                args.config_file = argv[++i];
+            if (i + 1 < arg_list.size()) {
+                args.config_file = arg_list[++i];
             } else {
                 throw std::runtime_error("Missing configuration file argument");
             }
@@ -170,7 +170,8 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
 
 int server_main(int argc, char* argv[]) {
     try {
-        auto args = parse_arguments(argc, argv);
+        auto arg_list = netcopy::common::preprocess_arguments(argc, argv);
+        auto args = parse_arguments(arg_list);
         
         if (args.version) {
             std::cout << netcopy::common::get_version_string() << std::endl;
@@ -217,7 +218,16 @@ int server_main(int argc, char* argv[]) {
             config.listen_port = args.listen_port;
         }
         if (!args.access_path.empty()) {
-            config.allowed_paths = {args.access_path};
+            std::string path = args.access_path;
+            // Trim leading and trailing whitespace, single/double quotes
+            size_t start = path.find_first_not_of(" \t\r\n\"'");
+            size_t end = path.find_last_not_of(" \t\r\n\"'");
+            if (start != std::string::npos && end != std::string::npos) {
+                path = path.substr(start, end - start + 1);
+            } else {
+                path = "";
+            }
+            config.allowed_paths = {path};
         }
         if (args.daemon || args.daemon_child) {
             config.run_as_daemon = true;
