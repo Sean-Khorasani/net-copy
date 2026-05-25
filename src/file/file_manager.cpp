@@ -266,8 +266,38 @@ std::string FileManager::join_path(const std::string& base, const std::string& r
 
 bool FileManager::is_path_safe(const std::string& path, const std::string& base_directory) {
     try {
-        std::filesystem::path normalized_path = std::filesystem::u8path(path).lexically_normal();
-        std::filesystem::path normalized_base = std::filesystem::u8path(base_directory).lexically_normal();
+        std::string clean_path = path;
+        std::string clean_base = base_directory;
+
+        // Trim leading and trailing whitespace, single/double quotes
+        auto trim_spaces_and_quotes = [](std::string& s) {
+            size_t start = s.find_first_not_of(" \t\r\n\"'");
+            size_t end = s.find_last_not_of(" \t\r\n\"'");
+            if (start != std::string::npos && end != std::string::npos) {
+                s = s.substr(start, end - start + 1);
+            } else {
+                s = "";
+            }
+        };
+        trim_spaces_and_quotes(clean_path);
+        trim_spaces_and_quotes(clean_base);
+
+        // Strip trailing slashes
+        while (clean_path.length() > 1 && (clean_path.back() == '/' || clean_path.back() == '\\')) {
+            if (clean_path.length() == 3 && clean_path[1] == ':') {
+                break;
+            }
+            clean_path.pop_back();
+        }
+        while (clean_base.length() > 1 && (clean_base.back() == '/' || clean_base.back() == '\\')) {
+            if (clean_base.length() == 3 && clean_base[1] == ':') {
+                break;
+            }
+            clean_base.pop_back();
+        }
+
+        std::filesystem::path normalized_path = std::filesystem::u8path(clean_path).lexically_normal();
+        std::filesystem::path normalized_base = std::filesystem::u8path(clean_base).lexically_normal();
         
         std::filesystem::path relative;
 
@@ -278,8 +308,14 @@ bool FileManager::is_path_safe(const std::string& path, const std::string& base_
         std::transform(path_w.begin(), path_w.end(), path_w.begin(), ::towlower);
         std::transform(base_w.begin(), base_w.end(), base_w.begin(), ::towlower);
         
+        if (path_w == base_w) {
+            return true;
+        }
         relative = std::filesystem::relative(std::filesystem::path(path_w), std::filesystem::path(base_w));
 #else
+        if (normalized_path == normalized_base) {
+            return true;
+        }
         // Check if the path is within the base directory
         relative = std::filesystem::relative(normalized_path, normalized_base);
 #endif
