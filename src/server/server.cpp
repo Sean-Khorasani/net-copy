@@ -1,4 +1,5 @@
 #include "server/server.h"
+#include "common/fast_mem.h"
 #include "file/file_manager.h"
 #include "logging/logger.h"
 #include "common/utils.h"
@@ -12,9 +13,104 @@
 #include <algorithm>
 #include <vector>
 #include <iostream>
+#include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
+#include <random>
+#include <unordered_map>
+#include <mutex>
 
 namespace netcopy {
 namespace server {
+
+struct ServerTransferSession {
+    std::string session_id;
+    std::string source_path;
+    std::string destination_path;
+    std::string owner_user; // empty if anonymous
+    std::string owner_ip;
+    std::atomic<uint64_t> bytes_transferred{0};
+    std::atomic<uint64_t> total_bytes{0};
+    std::atomic<bool> is_active{true};
+    std::string status{"transferring"}; // "transferring", "completed", "failed", "aborted"
+    std::vector<std::string> logs;
+    std::mutex logs_mutex;
+    std::chrono::system_clock::time_point start_time;
+};
+
+class SessionRegistry {
+public:
+    static SessionRegistry& instance() {
+        static SessionRegistry reg;
+        return reg;
+    }
+    
+    std::shared_ptr<ServerTransferSession> create_session(
+        const std::string& src, const std::string& dest,
+        const std::string& user, const std::string& ip,
+        uint64_t total_size) 
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto session = std::make_shared<ServerTransferSession>();
+        session->session_id = generate_uuid();
+        session->source_path = src;
+        session->destination_path = dest;
+        session->owner_user = user;
+        session->owner_ip = ip;
+        session->total_bytes = total_size;
+        session->start_time = std::chrono::system_clock::now();
+        
+        {
+            std::lock_guard<std::mutex> log_lock(session->logs_mutex);
+            session->logs.push_back("Session started at " + format_time(session->start_time));
+            session->logs.push_back("Source: " + src);
+            session->logs.push_back("Destination: " + dest);
+            session->logs.push_back("Owner: " + (user.empty() ? "anonymous" : user) + " (" + ip + ")");
+        }
+        
+        sessions_[session->session_id] = session;
+        return session;
+    }
+    
+    std::shared_ptr<ServerTransferSession> get_session(const std::string& id) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = sessions_.find(id);
+        if (it != sessions_.end()) {
+            return it->second;
+        }
+        return nullptr;
+    }
+    
+private:
+    std::mutex mutex_;
+    std::unordered_map<std::string, std::shared_ptr<ServerTransferSession>> sessions_;
+    
+    std::string generate_uuid() {
+        static const char hex[] = "0123456789abcdef";
+        static std::mt19937 gen(static_cast<unsigned int>(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::uniform_int_distribution<> dis(0, 15);
+        std::string s;
+        s.reserve(16);
+        for (int i = 0; i < 16; ++i) {
+            s += hex[dis(gen)];
+        }
+        return s;
+    }
+    
+    std::string format_time(std::chrono::system_clock::time_point tp) {
+        std::time_t t = std::chrono::system_clock::to_time_t(tp);
+        char buf[64];
+        struct tm timeinfo;
+#ifdef _WIN32
+        localtime_s(&timeinfo, &t);
+#else
+        localtime_r(&t, &timeinfo);
+#endif
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &timeinfo);
+        return buf;
+    }
+};
 
 // Helper: derive session key from base key + ML-KEM material (Task 4)
 
@@ -45,6 +141,12 @@ ConnectionHandler::ConnectionHandler(network::Socket client_socket,
 
 ConnectionHandler::~ConnectionHandler() {
     current_file_stream_.close();
+    if (current_session_ && current_session_->is_active) {
+        current_session_->is_active = false;
+        current_session_->status = "failed";
+        std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+        current_session_->logs.push_back("Session terminated due to connection loss or early handler termination.");
+    }
 }
 
 void ConnectionHandler::handle() {
@@ -95,6 +197,11 @@ void ConnectionHandler::handle() {
                 case protocol::MessageType::DISCONNECT: {
                     LOG_INFO("Client " + client_address_ + " disconnected gracefully");
                     return;
+                }
+                case protocol::MessageType::TRANSFER_STATUS_REQUEST: {
+                    auto req = dynamic_cast<protocol::TransferStatusRequest*>(message.get());
+                    if (req) handle_transfer_status_request(*req);
+                    break;
                 }
                 default:
                     LOG_WARNING("Received unknown message type from " + client_address_);
@@ -179,16 +286,18 @@ void ConnectionHandler::perform_handshake() {
     
     // Auth phase
     bool auth_needed = false;
-    if (user_db_.is_loaded()) {
-        if (!request->username.empty()) {
-            auth_needed = true;
-        } else if (!config_.allow_anonymous) {
+    if (!config_.allow_anonymous) {
+        if (!user_db_.is_loaded()) {
+            throw AuthException("Authentication required, but user database could not be loaded");
+        }
+        if (request->username.empty()) {
             throw AuthException("Anonymous access not allowed");
         }
-    } else if (!config_.allow_anonymous && !config_.users_file.empty()) {
-        // users_file configured but not found - allow only if allow_anonymous is true
-        if (!config_.allow_anonymous) {
-            LOG_WARNING("User database not found at '" + config_.users_file + "' - allowing anonymous (no auth)");
+        auth_needed = true;
+    } else {
+        // config_.allow_anonymous is true
+        if (user_db_.is_loaded() && !request->username.empty()) {
+            auth_needed = true;
         }
     }
 
@@ -337,6 +446,14 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
             response.file_size = 0;
         }
         
+        // Create transaction session
+        std::string client_ip = get_client_address();
+        current_session_ = SessionRegistry::instance().create_session(
+            request.source_path, request.destination_path,
+            authenticated_user_, client_ip, request.file_size
+        );
+        response.session_id = current_session_->session_id;
+        
     } catch (const std::exception& e) {
         response.success = false;
         response.error_message = e.what();
@@ -379,13 +496,21 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
         }
 
         uint64_t max_bytes_received = 0;
+        uint64_t chunk_total_payload_size = 0;
         for (const auto& chunk : chunks_to_process) {
             LOG_DEBUG("Writing " + std::to_string(chunk.data.size()) + " bytes at offset " + 
                      std::to_string(chunk.offset) + " to file: " + current_file_path_);
             
-            std::vector<uint8_t> payload = chunk.data;
+            std::vector<uint8_t> decompressed_payload;
+            const uint8_t* payload_ptr = nullptr;
+            size_t payload_size = 0;
             if (chunk.compressed) {
-                payload = common::decompress_buffer(chunk.data, static_cast<size_t>(chunk.uncompressed_size));
+                decompressed_payload = common::decompress_buffer(chunk.data, static_cast<size_t>(chunk.uncompressed_size));
+                payload_ptr = decompressed_payload.data();
+                payload_size = decompressed_payload.size();
+            } else {
+                payload_ptr = chunk.data.data();
+                payload_size = chunk.data.size();
             }
 
             if (current_is_symlink_) {
@@ -424,10 +549,11 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
                     current_truncate_on_zero_ = false;
                 }
                 
-                current_file_stream_.write(chunk.offset, payload.data(), payload.size());
+                current_file_stream_.write(chunk.offset, payload_ptr, payload_size);
             }
 
-            uint64_t end_offset = chunk.offset + payload.size();
+            uint64_t end_offset = chunk.offset + payload_size;
+            chunk_total_payload_size += payload_size;
             // Enforce max_file_size if configured (Task 3)
             if (config_.max_file_size > 0 && end_offset > config_.max_file_size) {
                 throw FileException("File exceeds maximum allowed size of " +
@@ -441,12 +567,22 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
             }
         }
 
+        if (current_session_) {
+            current_session_->bytes_transferred += chunk_total_payload_size;
+        }
+
         ack.bytes_received = max_bytes_received;
         ack.success = true;
         LOG_DEBUG("Successfully processed chunks, total bytes received: " + std::to_string(max_bytes_received));
 
     } catch (const std::exception& e) {
         current_file_stream_.close();
+        if (current_session_) {
+            current_session_->is_active = false;
+            current_session_->status = "failed";
+            std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+            current_session_->logs.push_back("Transfer failed: " + std::string(e.what()));
+        }
         ack.success = false;
         ack.error_message = e.what();
         LOG_ERROR("File data error: " + std::string(e.what()));
@@ -456,6 +592,12 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
     if (ack.success && message_completes_transfer) {
         current_transfer_completed_ = true;
         current_file_stream_.close();
+        if (current_session_) {
+            current_session_->is_active = false;
+            current_session_->status = "completed";
+            std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+            current_session_->logs.push_back("Transfer completed successfully.");
+        }
         if (!current_is_symlink_ && !is_marker_file) {
             std::error_code ec;
             uint64_t current_size = file::FileManager::exists(current_file_path_) ? file::FileManager::file_size(current_file_path_) : 0;
@@ -829,41 +971,132 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
     }
     resp.permissions = file::FileManager::get_permissions(resolved);
     resp.success = true;
+
+    // Create session
+    std::string client_ip = get_client_address();
+    current_session_ = SessionRegistry::instance().create_session(
+        request.remote_path, request.remote_path,
+        authenticated_user_, client_ip, resp.file_size
+    );
+    if (current_session_) {
+        current_session_->bytes_transferred = request.resume_offset;
+    }
+    resp.session_id = current_session_->session_id;
+
     send_message(resp);
 
     if (!resp.is_directory && !resp.is_symlink) {
         file::FileStream fs;
         if (!fs.open_read(resolved)) {
+            if (current_session_) {
+                current_session_->is_active = false;
+                current_session_->status = "failed";
+                std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+                current_session_->logs.push_back("Failed to open file for reading.");
+            }
             return;
         }
-        const size_t CHUNK = 1 * 1024 * 1024;
-        uint64_t offset = 0;
+        const size_t CHUNK = 4 * 1024 * 1024;
+        uint64_t offset = request.resume_offset;
         uint64_t file_size = resp.file_size;
-        while (offset < file_size) {
-            size_t to_read = static_cast<size_t>((std::min)(static_cast<uint64_t>(CHUNK), file_size - offset));
-            std::vector<uint8_t> buf(to_read);
-            size_t nr = fs.read(offset, buf.data(), to_read);
-            if (nr == 0) break;
-            buf.resize(nr);
-
+        
+        if (offset >= file_size) {
+            // Send empty final chunk to signal completion when fully resumed
             protocol::FileData chunk_msg;
-            chunk_msg.offset = offset;
-            chunk_msg.uncompressed_size = nr;
-            chunk_msg.data = std::move(buf);
             chunk_msg.compressed = false;
-            chunk_msg.is_last_chunk = (offset + nr >= file_size);
+            chunk_msg.offset = offset;
+            chunk_msg.uncompressed_size = 0;
+            chunk_msg.is_last_chunk = true;
             send_message(chunk_msg);
-
+            
             auto ack_msg = receive_message();
             auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
             if (!ack || !ack->success) {
-                LOG_ERROR("Download ACK failed");
-                break;
+                LOG_ERROR("Final Download ACK failed");
             }
-            offset += nr;
+        } else {
+            std::atomic<uint64_t> last_acknowledged_offset(offset);
+            std::atomic<bool> ack_thread_failed(false);
+            std::mutex ack_mutex;
+            std::condition_variable ack_cv;
+            
+            std::thread ack_thread([&]() {
+                try {
+                    while (last_acknowledged_offset.load() < file_size && !ack_thread_failed.load()) {
+                        auto ack_msg = receive_message();
+                        auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
+                        if (!ack || !ack->success) {
+                            LOG_ERROR("Download ACK failed");
+                            ack_thread_failed = true;
+                            ack_cv.notify_all();
+                            break;
+                        }
+                        
+                        last_acknowledged_offset = ack->bytes_received;
+                        ack_cv.notify_all();
+                    }
+                } catch (...) {
+                    ack_thread_failed = true;
+                    ack_cv.notify_all();
+                }
+            });
+
+            std::vector<uint8_t> buf(CHUNK);
+            protocol::FileData chunk_msg;
+            chunk_msg.compressed = false;
+            
+            while (offset < file_size && !ack_thread_failed.load()) {
+                {
+                    std::unique_lock<std::mutex> lock(ack_mutex);
+                    ack_cv.wait(lock, [&]() {
+                        return (offset - last_acknowledged_offset.load()) < 64 * 1024 * 1024 || ack_thread_failed.load();
+                    });
+                }
+                
+                if (ack_thread_failed.load()) break;
+
+                size_t to_read = static_cast<size_t>((std::min)(static_cast<uint64_t>(CHUNK), file_size - offset));
+                size_t nr = fs.read(offset, buf.data(), to_read);
+                if (nr == 0) break;
+
+                chunk_msg.offset = offset;
+                chunk_msg.uncompressed_size = nr;
+                chunk_msg.data.resize(nr);
+                if (nr > 0) {
+                    fast_mem::fast_memcpy(chunk_msg.data.data(), buf.data(), nr);
+                }
+                chunk_msg.is_last_chunk = (offset + nr >= file_size);
+                
+                send_message(chunk_msg);
+                
+                if (current_session_) {
+                    current_session_->bytes_transferred = offset + nr;
+                }
+                offset += nr;
+            }
+            
+            if (ack_thread.joinable()) {
+                ack_thread.join();
+            }
+            
+            if (ack_thread_failed.load() && current_session_) {
+                current_session_->is_active = false;
+                current_session_->status = "failed";
+                std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+                current_session_->logs.push_back("Download failed: missing or invalid ACK from client.");
+            }
         }
         fs.close();
-        LOG_INFO("Download completed: " + resolved + " (" + std::to_string(offset) + " bytes)");
+
+        if (offset >= file_size) {
+            LOG_INFO("Download completed: " + resolved + " (" + std::to_string(offset) + " bytes)");
+            if (current_session_) {
+                current_session_->is_active = false;
+                current_session_->status = "completed";
+                std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+                current_session_->logs.push_back("Download completed successfully.");
+            }
+        }
     } else if (resp.is_symlink) {
         // Send a single empty chunk to complete the flow
         protocol::FileData chunk_msg;
@@ -878,6 +1111,19 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
         auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
         if (!ack || !ack->success) {
             LOG_ERROR("Download symlink ACK failed");
+            if (current_session_) {
+                current_session_->is_active = false;
+                current_session_->status = "failed";
+                std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+                current_session_->logs.push_back("Download symlink failed: invalid ACK from client.");
+            }
+        } else {
+            if (current_session_) {
+                current_session_->is_active = false;
+                current_session_->status = "completed";
+                std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+                current_session_->logs.push_back("Download symlink completed successfully.");
+            }
         }
         LOG_INFO("Download symlink completed: " + resolved);
     }
@@ -989,6 +1235,59 @@ void ConnectionHandler::handle_block_hashes_request(const protocol::BlockHashesR
         LOG_ERROR("Block hashing error: " + std::string(e.what()));
     }
     
+    send_message(response);
+}
+
+void ConnectionHandler::handle_transfer_status_request(const protocol::TransferStatusRequest& request) {
+    protocol::TransferStatusResponse response;
+    response.success = false;
+
+    auto session = SessionRegistry::instance().get_session(request.session_id);
+    if (!session) {
+        response.error_message = "Session not found: " + request.session_id;
+        send_message(response);
+        return;
+    }
+
+    // Access control:
+    bool is_owner = false;
+    if (!session->owner_user.empty()) {
+        is_owner = (session->owner_user == authenticated_user_);
+    } else {
+        auto get_ip_only = [](const std::string& addr) {
+            size_t colon = addr.find_last_of(':');
+            if (colon != std::string::npos) {
+                if (addr.front() == '[' && addr[colon - 1] == ']') {
+                    return addr.substr(1, colon - 2);
+                }
+                return addr.substr(0, colon);
+            }
+            return addr;
+        };
+        is_owner = authenticated_user_.empty() && (get_ip_only(get_client_address()) == get_ip_only(session->owner_ip));
+    }
+
+    if (!is_owner) {
+        response.error_message = "Access denied to session info: " + request.session_id;
+        send_message(response);
+        return;
+    }
+
+    response.success = true;
+    response.active = session->is_active.load();
+    response.bytes_transferred = session->bytes_transferred.load();
+    response.total_bytes = session->total_bytes.load();
+    response.status_string = session->status;
+
+    std::string all_logs;
+    {
+        std::lock_guard<std::mutex> log_lock(session->logs_mutex);
+        for (const auto& log_line : session->logs) {
+            all_logs += log_line + "\n";
+        }
+    }
+    response.logs = all_logs;
+
     send_message(response);
 }
 
