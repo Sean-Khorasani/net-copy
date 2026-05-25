@@ -53,6 +53,7 @@ void signal_handler(int sig) {
 enum class OverwriteStateEnum {
     ASK,
     OVERWRITE_ALL,
+    DELTA_SYNC_ALL,
     SKIP_ALL
 };
 
@@ -90,6 +91,7 @@ struct CommandLineArgs {
     netcopy::crypto::SecurityLevel security_level = netcopy::crypto::SecurityLevel::HIGH;
     bool force = false;
     bool version = false;
+    std::string status_session_id;
 };
 
 void print_usage(const char* program_name) {
@@ -131,13 +133,13 @@ void print_usage(const char* program_name) {
     std::cout << "  " << program_name << " --get -R 192.168.1.100:/remote/dir ./local_dir" << std::endl;
 }
 
-CommandLineArgs parse_arguments(int argc, char* argv[]) {
+CommandLineArgs parse_arguments(const std::vector<std::string>& arg_list) {
     CommandLineArgs args;
     
     std::vector<std::string> positional_args;
     
-    for (int i = 1; i < argc; ++i) {
-        std::string arg = argv[i];
+    for (size_t i = 0; i < arg_list.size(); ++i) {
+        std::string arg = arg_list[i];
         
         if (arg == "-h" || arg == "--help") {
             args.help = true;
@@ -146,21 +148,21 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
             args.version = true;
             return args;
         } else if (arg == "-c" || arg == "--config") {
-            if (i + 1 < argc) {
-                args.config_file = argv[++i];
+            if (i + 1 < arg_list.size()) {
+                args.config_file = arg_list[++i];
             } else {
                 throw std::runtime_error("Missing configuration file argument");
             }
         } else if (arg == "-p" || arg == "--port") { // Added port parsing
-            if (i + 1 < argc) {
+            if (i + 1 < arg_list.size()) {
                 try {
-                    int port_int = std::stoi(argv[++i]);
+                    int port_int = std::stoi(arg_list[++i]);
                     if (port_int < 1 || port_int > 65535) {
                         throw std::runtime_error("Port number out of range (1-65535)");
                     }
                     args.server_port = static_cast<uint16_t>(port_int);
                 } catch (const std::exception& e) {
-                    throw std::runtime_error("Error parsing port argument '" + std::string(argv[i]) + "': " + e.what());
+                    throw std::runtime_error("Error parsing port argument '" + std::string(arg_list[i]) + "': " + e.what());
                 }
             } else {
                 throw std::runtime_error("Missing port number argument");
@@ -171,6 +173,12 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
             args.resume = true;
         } else if (arg == "-f" || arg == "--force") {
             args.force = true;
+        } else if (arg == "--status") {
+            if (i + 1 < arg_list.size()) {
+                args.status_session_id = arg_list[++i];
+            } else {
+                throw std::runtime_error("Missing session ID argument for --status");
+            }
         } else if (arg == "--auto-create") {
             args.auto_create_directories = true;
             args.auto_create_specified = true;
@@ -181,8 +189,8 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
             args.empty_dirs_specified = true;
             args.create_empty_directories = false;
         } else if (arg == "-s" || arg == "--security") {
-            if (i + 1 < argc) {
-                std::string level = argv[++i];
+            if (i + 1 < arg_list.size()) {
+                std::string level = arg_list[++i];
                 if (level == "high") {
                     args.security_level = netcopy::crypto::SecurityLevel::HIGH;
                 } else if (level == "fast") {
@@ -206,7 +214,15 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
         }
     }
     
-    if (positional_args.size() == 2) {
+    if (!args.status_session_id.empty()) {
+        if (positional_args.size() == 1) {
+            args.destination_path = positional_args[0];
+        } else if (positional_args.empty()) {
+            args.destination_path = "127.0.0.1";
+        } else {
+            throw std::runtime_error("Too many arguments for --status query. Expected: [server_address]");
+        }
+    } else if (positional_args.size() == 2) {
         args.source_path = positional_args[0];
         args.destination_path = positional_args[1];
     } else if (!args.help && !args.version) {
@@ -224,7 +240,8 @@ CommandLineArgs parse_arguments(int argc, char* argv[]) {
 
 int client_main(int argc, char* argv[]) {
     try {
-        auto args = parse_arguments(argc, argv);
+        auto arg_list = netcopy::common::preprocess_arguments(argc, argv);
+        auto args = parse_arguments(arg_list);
         
         if (args.version) {
             std::cout << netcopy::common::get_version_string() << std::endl;
@@ -567,6 +584,31 @@ int client_main(int argc, char* argv[]) {
         std::signal(SIGTERM, signal_handler);
 #endif
 
+        if (!args.status_session_id.empty()) {
+            std::cout << "Querying session status for: " << args.status_session_id << std::endl;
+            auto status_resp = client.query_transfer_status(args.status_session_id);
+            if (status_resp.success) {
+                std::cout << "======================================" << std::endl;
+                std::cout << "Session ID:        " << args.status_session_id << std::endl;
+                std::cout << "Status:            " << status_resp.status_string << std::endl;
+                std::cout << "Bytes Transferred: " << status_resp.bytes_transferred << std::endl;
+                std::cout << "Total Bytes:       " << status_resp.total_bytes << std::endl;
+                std::cout << "Active:            " << (status_resp.active ? "Yes" : "No") << std::endl;
+                std::cout << "--------------------------------------" << std::endl;
+                std::cout << "Audit Logs:" << std::endl;
+                std::cout << status_resp.logs;
+                std::cout << "======================================" << std::endl;
+            } else {
+                std::cerr << "Query failed: " << status_resp.error_message << std::endl;
+            }
+            
+#ifdef _WIN32
+            SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
+            g_active_client = nullptr;
+#endif
+            return 0;
+        }
+
         bool use_ansi = false;
 #ifdef _WIN32
         HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -595,17 +637,23 @@ int client_main(int argc, char* argv[]) {
             if (overwrite_state->state == OverwriteStateEnum::OVERWRITE_ALL) {
                 return netcopy::client::Client::OverwriteDecision::OVERWRITE;
             }
+            if (overwrite_state->state == OverwriteStateEnum::DELTA_SYNC_ALL) {
+                return netcopy::client::Client::OverwriteDecision::DELTA_SYNC;
+            }
             if (overwrite_state->state == OverwriteStateEnum::SKIP_ALL) {
                 return netcopy::client::Client::OverwriteDecision::SKIP;
             }
             
             std::cout << "\nFile already exists: " << remote_path << " (" << remote_size << " bytes)" << std::endl;
             while (true) {
-                std::cout << "Overwrite? [y]es, [n]o, [a]ll, [s]kip all, [c]ancel: " << std::flush;
+                std::cout << "Overwrite? [y]es, [n]o, [a]ll, [s]kip all, [d]elta sync, [D]elta sync all, [c]ancel: " << std::flush;
                 std::string response;
                 if (!std::getline(std::cin, response)) {
                     return netcopy::client::Client::OverwriteDecision::CANCEL;
                 }
+                
+                bool is_delta_all = (response == "D");
+                
                 // Trim and convert to lower case
                 std::transform(response.begin(), response.end(), response.begin(), ::tolower);
                 if (response == "y" || response == "yes") {
@@ -615,6 +663,11 @@ int client_main(int argc, char* argv[]) {
                 } else if (response == "a" || response == "all") {
                     overwrite_state->state = OverwriteStateEnum::OVERWRITE_ALL;
                     return netcopy::client::Client::OverwriteDecision::OVERWRITE;
+                } else if (is_delta_all) {
+                    overwrite_state->state = OverwriteStateEnum::DELTA_SYNC_ALL;
+                    return netcopy::client::Client::OverwriteDecision::DELTA_SYNC;
+                } else if (response == "d" || response == "delta sync") {
+                    return netcopy::client::Client::OverwriteDecision::DELTA_SYNC;
                 } else if (response == "s" || response == "skip all") {
                     overwrite_state->state = OverwriteStateEnum::SKIP_ALL;
                     return netcopy::client::Client::OverwriteDecision::SKIP;
