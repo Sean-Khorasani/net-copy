@@ -93,6 +93,13 @@ elseif(MSVC)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 endif()
 
+# Enable assembly support conditionally
+if(MSVC)
+    enable_language(ASM_MASM)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    enable_language(ASM)
+endif()
+
 # Common include directories
 include_directories(include)
 
@@ -118,7 +125,15 @@ set(COMMON_SOURCES
     src/common/compression.cpp
     src/auth/user_db.cpp
     src/auth/auth_engine.cpp
+    src/common/fast_mem.cpp
 )
+
+# Add conditional assembly files
+if(MSVC)
+    list(APPEND COMMON_SOURCES src/common/fast_memcpy_masm.asm)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    list(APPEND COMMON_SOURCES src/common/fast_memcpy_avx.s)
+endif()
 
 # Add GPU source if CUDA is available, otherwise use CPU fallback
 if(CUDA_ENABLED)
@@ -239,6 +254,26 @@ if(WIN32)
     
     # Install the service executable
     install(TARGETS net_copy_service DESTINATION bin)
+
+    # Windows GUI client
+    add_executable(net_copy_gui
+        src/gui/main.cpp
+        src/gui/gui_server.cpp
+        src/client/client.cpp
+    )
+    target_link_libraries(net_copy_gui PRIVATE net_copy_common ws2_32 shell32)
+    
+    # Link CUDA libraries to Windows GUI if available
+    if(CUDA_ENABLED)
+        if(CUDAToolkit_FOUND)
+            target_link_libraries(net_copy_gui PRIVATE CUDA::cudart CUDA::cuda_driver)
+        else()
+            target_link_libraries(net_copy_gui PRIVATE ${CUDA_LIBRARIES})
+        endif()
+    endif()
+    
+    # Install the GUI executable
+    install(TARGETS net_copy_gui DESTINATION bin)
 endif()
 
 # Add install targets
