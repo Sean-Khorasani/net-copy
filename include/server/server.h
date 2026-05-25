@@ -16,6 +16,8 @@
 namespace netcopy {
 namespace server {
 
+struct ServerTransferSession;
+
 class ConnectionHandler {
 public:
     ConnectionHandler(network::Socket client_socket, 
@@ -52,6 +54,7 @@ private:
     std::vector<uint8_t> server_nonce_from_handshake_;
     int auth_failure_count_ = 0;
     static constexpr int MAX_AUTH_FAILURES = 5;
+    std::shared_ptr<ServerTransferSession> current_session_;
     
     // Protocol handling
     void perform_handshake();
@@ -61,6 +64,7 @@ private:
     void handle_list_request(const protocol::ListRequest& request);
     void handle_file_verify_request(const protocol::FileVerifyRequest& request);
     void handle_block_hashes_request(const protocol::BlockHashesRequest& request);
+    void handle_transfer_status_request(const protocol::TransferStatusRequest& request);
     
     // Message handling
     void send_message(const protocol::Message& message);
