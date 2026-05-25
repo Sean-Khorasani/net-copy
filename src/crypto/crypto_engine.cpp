@@ -1,4 +1,5 @@
 #include "crypto/crypto_engine.h"
+#include "common/fast_mem.h"
 #include <cstring>
 #include <stdexcept>
 
@@ -36,9 +37,13 @@ std::vector<uint8_t> HighSecurityEngine::encrypt(const std::vector<uint8_t>& dat
     auto encrypted = cipher_->encrypt(data, nonce);
     
     // Prepend nonce to encrypted data
-    std::vector<uint8_t> result;
-    result.insert(result.end(), nonce.begin(), nonce.end());
-    result.insert(result.end(), encrypted.begin(), encrypted.end());
+    std::vector<uint8_t> result(nonce.size() + encrypted.size());
+    if (!nonce.empty()) {
+        fast_mem::fast_memcpy(result.data(), nonce.data(), nonce.size());
+    }
+    if (!encrypted.empty()) {
+        fast_mem::fast_memcpy(result.data() + nonce.size(), encrypted.data(), encrypted.size());
+    }
     
     return result;
 }
@@ -51,14 +56,17 @@ std::vector<uint8_t> HighSecurityEngine::decrypt(const std::vector<uint8_t>& dat
     
     // Extract nonce
     ChaCha20Poly1305::Nonce nonce;
-    std::copy(data.begin(), data.begin() + nonce.size(), nonce.begin());
+    fast_mem::fast_memcpy(nonce.data(), data.data(), nonce.size());
     
     // Extract encrypted data (including tag)
-    std::vector<uint8_t> encrypted_data(data.begin() + nonce.size(), data.end());
+    std::vector<uint8_t> encrypted_data(data.size() - nonce.size());
+    if (!encrypted_data.empty()) {
+        fast_mem::fast_memcpy(encrypted_data.data(), data.data() + nonce.size(), encrypted_data.size());
+    }
     
     // Extract tag from the end of encrypted data
     ChaCha20Poly1305::Tag tag;
-    std::copy(encrypted_data.end() - tag.size(), encrypted_data.end(), tag.begin());
+    fast_mem::fast_memcpy(tag.data(), encrypted_data.data() + encrypted_data.size() - tag.size(), tag.size());
     
     return cipher_->decrypt(encrypted_data, nonce, tag);
 }
@@ -147,9 +155,13 @@ std::vector<uint8_t> AesSecurityEngine::encrypt(const std::vector<uint8_t>& data
     auto encrypted = cipher_->process(data, iv);
     
     // Prepend IV to encrypted data
-    std::vector<uint8_t> result;
-    result.insert(result.end(), iv.begin(), iv.end());
-    result.insert(result.end(), encrypted.begin(), encrypted.end());
+    std::vector<uint8_t> result(iv.size() + encrypted.size());
+    if (!iv.empty()) {
+        fast_mem::fast_memcpy(result.data(), iv.data(), iv.size());
+    }
+    if (!encrypted.empty()) {
+        fast_mem::fast_memcpy(result.data() + iv.size(), encrypted.data(), encrypted.size());
+    }
     
     return result;
 }
@@ -161,10 +173,13 @@ std::vector<uint8_t> AesSecurityEngine::decrypt(const std::vector<uint8_t>& data
     
     // Extract IV from the beginning
     AesCtr::IV iv;
-    std::copy(data.begin(), data.begin() + AesCtr::IV_SIZE, iv.begin());
+    fast_mem::fast_memcpy(iv.data(), data.data(), AesCtr::IV_SIZE);
     
     // Extract encrypted data
-    std::vector<uint8_t> encrypted_data(data.begin() + AesCtr::IV_SIZE, data.end());
+    std::vector<uint8_t> encrypted_data(data.size() - AesCtr::IV_SIZE);
+    if (!encrypted_data.empty()) {
+        fast_mem::fast_memcpy(encrypted_data.data(), data.data() + AesCtr::IV_SIZE, encrypted_data.size());
+    }
     
     // Decrypt (CTR mode encryption and decryption are the same)
     return cipher_->process(encrypted_data, iv);
@@ -222,9 +237,13 @@ std::vector<uint8_t> GpuSecurityEngine::encrypt(const std::vector<uint8_t>& data
     auto result = cipher_->encrypt(data, iv);
     
     // Prepend IV to encrypted data
-    std::vector<uint8_t> final_result;
-    final_result.insert(final_result.end(), iv.begin(), iv.end());
-    final_result.insert(final_result.end(), result.begin(), result.end());
+    std::vector<uint8_t> final_result(iv.size() + result.size());
+    if (!iv.empty()) {
+        fast_mem::fast_memcpy(final_result.data(), iv.data(), iv.size());
+    }
+    if (!result.empty()) {
+        fast_mem::fast_memcpy(final_result.data() + iv.size(), result.data(), result.size());
+    }
     
     return final_result;
 }
@@ -236,10 +255,13 @@ std::vector<uint8_t> GpuSecurityEngine::decrypt(const std::vector<uint8_t>& data
     
     // Extract IV from the beginning
     Aes256GcmGpu::IV iv;
-    std::copy(data.begin(), data.begin() + Aes256GcmGpu::IV_SIZE, iv.begin());
+    fast_mem::fast_memcpy(iv.data(), data.data(), Aes256GcmGpu::IV_SIZE);
     
     // Extract encrypted data with tag
-    std::vector<uint8_t> ciphertext_with_tag(data.begin() + Aes256GcmGpu::IV_SIZE, data.end());
+    std::vector<uint8_t> ciphertext_with_tag(data.size() - Aes256GcmGpu::IV_SIZE);
+    if (!ciphertext_with_tag.empty()) {
+        fast_mem::fast_memcpy(ciphertext_with_tag.data(), data.data() + Aes256GcmGpu::IV_SIZE, ciphertext_with_tag.size());
+    }
     
     if (ciphertext_with_tag.size() < Aes256GcmGpu::TAG_SIZE) {
         throw std::runtime_error("Ciphertext too short for authentication tag");
@@ -247,12 +269,13 @@ std::vector<uint8_t> GpuSecurityEngine::decrypt(const std::vector<uint8_t>& data
     
     // Extract tag from the end
     Aes256GcmGpu::Tag tag;
-    std::copy(ciphertext_with_tag.end() - Aes256GcmGpu::TAG_SIZE, 
-             ciphertext_with_tag.end(), tag.begin());
+    fast_mem::fast_memcpy(tag.data(), ciphertext_with_tag.data() + ciphertext_with_tag.size() - Aes256GcmGpu::TAG_SIZE, Aes256GcmGpu::TAG_SIZE);
     
     // Extract ciphertext without tag
-    std::vector<uint8_t> ciphertext(ciphertext_with_tag.begin(), 
-                                   ciphertext_with_tag.end() - Aes256GcmGpu::TAG_SIZE);
+    std::vector<uint8_t> ciphertext(ciphertext_with_tag.size() - Aes256GcmGpu::TAG_SIZE);
+    if (!ciphertext.empty()) {
+        fast_mem::fast_memcpy(ciphertext.data(), ciphertext_with_tag.data(), ciphertext.size());
+    }
     
     // Decrypt and verify
     return cipher_->decrypt(ciphertext, iv, tag);
