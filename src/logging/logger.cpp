@@ -20,6 +20,11 @@ void Logger::set_level(LogLevel level) {
     level_ = level;
 }
 
+void Logger::set_console_level(LogLevel level) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    console_level_ = level;
+}
+
 void Logger::set_file_output(const std::string& filename) {
     std::lock_guard<std::mutex> lock(mutex_);
     log_file_ = filename;
@@ -38,13 +43,16 @@ void Logger::set_json_format(bool enable) {
 void Logger::log(LogLevel level, const std::string& message) {
     std::lock_guard<std::mutex> lock(mutex_);
     
-    if (level < level_) {
+    bool log_to_console = console_output_ && (level >= console_level_);
+    bool log_to_file = !log_file_.empty() && (level >= level_);
+    
+    if (!log_to_console && !log_to_file) {
         return;
     }
     
     std::string formatted_message = format_message(level, message);
     
-    if (console_output_) {
+    if (log_to_console) {
         if (level >= LogLevel::LOG_ERROR) {
             std::cerr << formatted_message << std::endl;
         } else {
@@ -52,7 +60,7 @@ void Logger::log(LogLevel level, const std::string& message) {
         }
     }
     
-    if (!log_file_.empty()) {
+    if (log_to_file) {
         std::ofstream file(std::filesystem::u8path(log_file_), std::ios::app);
         if (file) {
             file << formatted_message << std::endl;
