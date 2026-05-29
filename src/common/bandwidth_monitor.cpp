@@ -49,8 +49,15 @@ double BandwidthMonitor::get_current_rate() const {
     }
     
     // Calculate time span
-    auto time_span = now - (start_it - 1)->timestamp;
-    auto seconds = std::chrono::duration<double>(time_span).count();
+    std::chrono::duration<double> time_span;
+    if (start_it == transfer_history_.begin()) {
+        // If all entries are in the window, measure from the absolute start time
+        time_span = now - start_time_;
+    } else {
+        // Measure from the timestamp of the entry just before the window
+        time_span = now - (start_it - 1)->timestamp;
+    }
+    auto seconds = time_span.count();
     
     if (seconds <= 0.0) {
         return 0.0;
