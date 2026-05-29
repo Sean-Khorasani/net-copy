@@ -5,6 +5,7 @@
 #include <atomic>
 #include <memory_resource>
 #include <vector>
+#include <mutex>
 #include <new>
 
 #if defined(_MSC_VER)
@@ -27,12 +28,7 @@ enum class CpuFeatures {
 
 CpuFeatures detect_cpu_features();
 
-// Assembly-optimized functions (MASM on Windows / GAS on GCC/Clang)
-#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_AMD64))
-extern "C" void* fast_memcpy_avx2_masm(void* dest, const void* src, size_t n);
-extern "C" void* fast_memset_avx2_masm(void* dest, int value, size_t n);
-#endif
-
+// GCC/Clang GAS assembly (Linux/macOS)
 #if (defined(__GNUC__) || defined(__clang__)) && defined(__x86_64__)
 extern "C" void* fast_memcpy_avx2(void* dest, const void* src, size_t n);
 #endif
@@ -78,7 +74,8 @@ private:
     uint8_t* memory_;
     size_t block_size_;
     size_t num_blocks_;
-    std::atomic<void*> free_list_head_{nullptr};
+    std::vector<void*> free_list_;
+    std::mutex mutex_;
 };
 
 // std::pmr compatible memory resource
