@@ -88,7 +88,6 @@ std::string format_rate(double bytes_per_sec) {
 GuiServer::GuiServer()
     : port_(0),
       running_(false),
-      listen_socket_(static_cast<uint64_t>(INVALID_SOCKET)),
       active_security_level_(crypto::SecurityLevel::HIGH),
       remote_connected_(false),
       remote_port_(0),
@@ -102,70 +101,58 @@ GuiServer::~GuiServer() {
 }
 
 bool GuiServer::start(uint16_t port) {
-#ifdef _WIN32
-    WSADATA wsaData;
-    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-        LOG_ERROR("WSAStartup failed.");
-        return false;
-    }
-#endif
-
-    SOCKET_TYPE s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) {
-        LOG_ERROR("Failed to create listen socket.");
-        return false;
-    }
-
-    int opt = 1;
-    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&opt), sizeof(opt));
-
-    sockaddr_in addr;
-    std::memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-
-    bool bound = false;
-    uint16_t current_port = port;
-    // Auto-increment fallback if port is busy (try up to 50 ports)
-    for (int i = 0; i < 50; ++i) {
-        addr.sin_port = htons(current_port);
-        if (bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
-            bound = true;
-            break;
+    try {
+        event_loop_ = std::make_unique<network::EventLoop>(4); // 4 threads for GUI backend
+        event_loop_->start();
+        
+        asio::ip::tcp::endpoint endpoint(asio::ip::address::from_string("127.0.0.1"), port);
+        acceptor_ = std::make_unique<asio::ip::tcp::acceptor>(event_loop_->get_io_context());
+        
+        acceptor_->open(endpoint.protocol());
+        acceptor_->set_option(asio::ip::tcp::acceptor::reuse_address(true));
+        
+        bool bound = false;
+        uint16_t current_port = port;
+        for (int i = 0; i < 50; ++i) {
+            endpoint.port(current_port);
+            asio::error_code ec;
+            acceptor_->bind(endpoint, ec);
+            if (!ec) {
+                bound = true;
+                break;
+            }
+            current_port++;
         }
-        current_port++;
-    }
-
-    if (!bound) {
-        LOG_ERROR("Failed to bind to port " + std::to_string(port) + " or any fallback ports.");
-        closesocket(s);
+        
+        if (!bound) {
+            LOG_ERROR("Failed to bind to port " + std::to_string(port) + " or any fallback ports.");
+            return false;
+        }
+        
+        acceptor_->listen(asio::socket_base::max_listen_connections);
+        port_ = current_port;
+        running_ = true;
+        
+        do_accept();
+        return true;
+    } catch (const std::exception& e) {
+        LOG_ERROR("GuiServer start failed: " + std::string(e.what()));
         return false;
     }
-
-    if (listen(s, SOMAXCONN) != 0) {
-        LOG_ERROR("Failed to listen on socket.");
-        closesocket(s);
-        return false;
-    }
-
-    listen_socket_ = static_cast<uint64_t>(s);
-    port_ = current_port;
-    running_ = true;
-
-    listen_thread_ = std::thread(&GuiServer::listen_loop, this);
-    return true;
 }
 
 void GuiServer::stop() {
     running_ = false;
-    SOCKET_TYPE s = static_cast<SOCKET_TYPE>(listen_socket_);
-    if (s != INVALID_SOCKET) {
-        closesocket(s);
-        listen_socket_ = static_cast<uint64_t>(INVALID_SOCKET);
+    
+    if (acceptor_) {
+        asio::error_code ec;
+        acceptor_->close(ec);
+        acceptor_.reset();
     }
-
-    if (listen_thread_.joinable()) {
-        listen_thread_.join();
+    
+    if (event_loop_) {
+        event_loop_->stop();
+        event_loop_.reset();
     }
 
     {
@@ -188,164 +175,149 @@ void GuiServer::stop() {
         active_client_.reset();
     }
     remote_connected_ = false;
-
-#ifdef _WIN32
-    WSACleanup();
-#endif
 }
 
-void GuiServer::listen_loop() {
-    while (running_) {
-        SOCKET_TYPE s = static_cast<SOCKET_TYPE>(listen_socket_);
-        if (s == INVALID_SOCKET) {
-            break;
+class HttpConnection : public std::enable_shared_from_this<HttpConnection> {
+public:
+    HttpConnection(std::shared_ptr<asio::ip::tcp::socket> socket, GuiServer* server)
+        : socket_(std::move(socket)), server_(server) {}
+
+    void start() {
+        auto self = shared_from_this();
+        asio::async_read_until(*socket_, buffer_, "\r\n\r\n",
+            [this, self](const asio::error_code& ec, std::size_t bytes_transferred) {
+                if (!ec) {
+                    process_headers(bytes_transferred);
+                }
+            });
+    }
+
+private:
+    void process_headers(std::size_t bytes_transferred) {
+        std::istream is(&buffer_);
+        std::string request_line;
+        std::getline(is, request_line);
+        if (!request_line.empty() && request_line.back() == '\r') {
+            request_line.pop_back();
         }
 
-        sockaddr_in client_addr;
-        int addr_len = sizeof(client_addr);
-        SOCKET_TYPE client_sock = accept(s, reinterpret_cast<sockaddr*>(&client_addr), &addr_len);
-        if (client_sock == INVALID_SOCKET) {
-            if (!running_) {
-                break;
+        std::string header;
+        std::size_t content_length = 0;
+        while (std::getline(is, header) && header != "\r") {
+            if (header.size() > 15 && header.substr(0, 15) == "Content-Length:") {
+                content_length = std::stoull(header.substr(16));
+            } else if (header.size() > 15 && header.substr(0, 15) == "content-length:") {
+                content_length = std::stoull(header.substr(16));
             }
-            std::this_thread::sleep_for(std::chrono::milliseconds(50));
-            continue;
         }
 
-        std::thread(&GuiServer::handle_client, this, static_cast<uint64_t>(client_sock)).detach();
+        std::size_t already_read = buffer_.size();
+        if (already_read < content_length) {
+            std::size_t to_read = content_length - already_read;
+            auto self = shared_from_this();
+            asio::async_read(*socket_, buffer_, asio::transfer_exactly(to_read),
+                [this, self, request_line](const asio::error_code& ec, std::size_t) {
+                    if (!ec) {
+                        process_body(request_line);
+                    }
+                });
+        } else {
+            process_body(request_line);
+        }
     }
+
+    void process_body(const std::string& request_line) {
+        std::string body((std::istreambuf_iterator<char>(&buffer_)), std::istreambuf_iterator<char>());
+        dispatch(request_line, body);
+    }
+
+    void dispatch(const std::string& request_line, const std::string& body) {
+        size_t method_end = request_line.find(' ');
+        if (method_end == std::string::npos) return;
+        std::string method = request_line.substr(0, method_end);
+
+        size_t path_end = request_line.find(' ', method_end + 1);
+        if (path_end == std::string::npos) return;
+        std::string full_path = request_line.substr(method_end + 1, path_end - (method_end + 1));
+
+        std::string path = full_path;
+        std::string query_string;
+        size_t q_pos = full_path.find('?');
+        if (q_pos != std::string::npos) {
+            path = full_path.substr(0, q_pos);
+            query_string = full_path.substr(q_pos + 1);
+        }
+
+        if (method == "OPTIONS") {
+            server_->send_response(socket_, "204 No Content", "text/plain", "");
+        } else if (method == "GET" && (path == "/" || path == "/index.html")) {
+            server_->send_response(socket_, "200 OK", "text/html", GUI_HTML_CONTENT);
+        } else if (method == "GET" && path == "/api/drives") {
+            server_->handle_api_drives(socket_);
+        } else if (method == "GET" && path == "/api/local/list") {
+            server_->handle_api_local_list(socket_, query_string);
+        } else if (method == "POST" && path == "/api/connect") {
+            server_->handle_api_connect(socket_, body);
+        } else if (method == "POST" && path == "/api/disconnect") {
+            server_->handle_api_disconnect(socket_);
+        } else if (method == "GET" && path == "/api/remote/list") {
+            server_->handle_api_remote_list(socket_, query_string);
+        } else if (method == "POST" && path == "/api/transfer") {
+            server_->handle_api_transfer(socket_, body);
+        } else if (method == "GET" && path == "/api/transfers") {
+            server_->handle_api_transfers(socket_);
+        } else if (method == "GET" && path == "/api/transfer/status") {
+            server_->handle_api_transfer_status(socket_, query_string);
+        } else if (method == "POST" && path == "/api/transfer/remove") {
+            server_->handle_api_transfer_remove(socket_, body);
+        } else if (method == "POST" && path == "/api/transfer/control") {
+            server_->handle_api_transfer_control(socket_, body);
+        } else if (method == "POST" && path == "/api/transfer/file/control") {
+            server_->handle_api_transfer_file_control(socket_, body);
+        } else if (method == "GET" && path == "/api/transfer/server_session") {
+            server_->handle_api_transfer_server_session(socket_, query_string);
+        } else if (method == "GET" && path == "/api/remote/check") {
+            server_->handle_api_remote_check(socket_);
+        } else if (method == "POST" && path == "/api/local/create_dir") {
+            server_->handle_api_local_create_dir(socket_, query_string);
+        } else if (method == "POST" && path == "/api/remote/create_dir") {
+            server_->handle_api_remote_create_dir(socket_, query_string);
+        } else if (method == "GET" && path == "/api/profiles") {
+            server_->handle_api_profiles(socket_);
+        } else if (method == "POST" && path == "/api/profiles/save") {
+            server_->handle_api_profiles_save(socket_, body);
+        } else if (method == "POST" && path == "/api/profiles/delete") {
+            server_->handle_api_profiles_delete(socket_, body);
+        } else if (method == "POST" && path == "/api/share/create") {
+            server_->handle_api_share_create(socket_, body);
+        } else if (method == "GET" && path == "/api/share/list") {
+            server_->handle_api_share_list(socket_);
+        } else if (method == "GET" && path.rfind("/shared/", 0) == 0) {
+            server_->handle_shared_download(socket_, path.substr(8));
+        } else {
+            server_->send_error(socket_, 404, "Not Found");
+        }
+    }
+
+    std::shared_ptr<asio::ip::tcp::socket> socket_;
+    GuiServer* server_;
+    asio::streambuf buffer_;
+};
+
+void GuiServer::do_accept() {
+    auto socket = std::make_shared<asio::ip::tcp::socket>(event_loop_->get_io_context());
+    acceptor_->async_accept(*socket, [this, socket](const asio::error_code& ec) {
+        if (!running_) return;
+        
+        if (!ec) {
+            std::make_shared<HttpConnection>(socket, this)->start();
+        }
+        
+        do_accept();
+    });
 }
 
-void GuiServer::handle_client(uint64_t client_socket) {
-    std::string request_data;
-    char buffer[4096];
-    int bytes_received = 0;
-    size_t header_end = std::string::npos;
-    SOCKET_TYPE sock = static_cast<SOCKET_TYPE>(client_socket);
-
-    while (true) {
-        bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_received <= 0) {
-            closesocket(sock);
-            return;
-        }
-        buffer[bytes_received] = '\0';
-        request_data.append(buffer, bytes_received);
-
-        header_end = request_data.find("\r\n\r\n");
-        if (header_end != std::string::npos) {
-            break;
-        }
-        if (request_data.length() > 65536) {
-            send_error(client_socket, 400, "Bad Request: Headers too large");
-            closesocket(sock);
-            return;
-        }
-    }
-
-    std::string headers = request_data.substr(0, header_end);
-    std::string body = request_data.substr(header_end + 4);
-
-    size_t first_line_end = headers.find("\r\n");
-    if (first_line_end == std::string::npos) {
-        send_error(client_socket, 400, "Bad Request");
-        closesocket(sock);
-        return;
-    }
-    std::string request_line = headers.substr(0, first_line_end);
-
-    size_t method_end = request_line.find(' ');
-    if (method_end == std::string::npos) {
-        send_error(client_socket, 400, "Bad Request");
-        closesocket(sock);
-        return;
-    }
-    std::string method = request_line.substr(0, method_end);
-
-    size_t path_end = request_line.find(' ', method_end + 1);
-    if (path_end == std::string::npos) {
-        send_error(client_socket, 400, "Bad Request");
-        closesocket(sock);
-        return;
-    }
-    std::string full_path = request_line.substr(method_end + 1, path_end - (method_end + 1));
-
-    std::string path = full_path;
-    std::string query_string;
-    size_t q_pos = full_path.find('?');
-    if (q_pos != std::string::npos) {
-        path = full_path.substr(0, q_pos);
-        query_string = full_path.substr(q_pos + 1);
-    }
-
-    size_t content_length = 0;
-    size_t cl_pos = headers.find("Content-Length:");
-    if (cl_pos == std::string::npos) {
-        cl_pos = headers.find("content-length:");
-    }
-    if (cl_pos != std::string::npos) {
-        size_t cl_val_start = headers.find_first_not_of(" \t", cl_pos + 15);
-        size_t cl_val_end = headers.find("\r\n", cl_val_start);
-        if (cl_val_start != std::string::npos && cl_val_end != std::string::npos) {
-            content_length = std::stoull(headers.substr(cl_val_start, cl_val_end - cl_val_start));
-        }
-    }
-
-    while (body.length() < content_length) {
-        bytes_received = recv(sock, buffer, sizeof(buffer) - 1, 0);
-        if (bytes_received <= 0) {
-            closesocket(sock);
-            return;
-        }
-        buffer[bytes_received] = '\0';
-        body.append(buffer, bytes_received);
-    }
-    if (body.length() > content_length) {
-        body = body.substr(0, content_length);
-    }
-
-    if (method == "OPTIONS") {
-        send_response(client_socket, "204 No Content", "text/plain", "");
-    } else if (method == "GET" && (path == "/" || path == "/index.html")) {
-        send_response(client_socket, "200 OK", "text/html", GUI_HTML_CONTENT);
-    } else if (method == "GET" && path == "/api/drives") {
-        handle_api_drives(client_socket);
-    } else if (method == "GET" && path == "/api/local/list") {
-        handle_api_local_list(client_socket, query_string);
-    } else if (method == "POST" && path == "/api/connect") {
-        handle_api_connect(client_socket, body);
-    } else if (method == "POST" && path == "/api/disconnect") {
-        handle_api_disconnect(client_socket);
-    } else if (method == "GET" && path == "/api/remote/list") {
-        handle_api_remote_list(client_socket, query_string);
-    } else if (method == "POST" && path == "/api/transfer") {
-        handle_api_transfer(client_socket, body);
-    } else if (method == "GET" && path == "/api/transfers") {
-        handle_api_transfers(client_socket);
-    } else if (method == "GET" && path == "/api/transfer/status") {
-        handle_api_transfer_status(client_socket, query_string);
-    } else if (method == "POST" && path == "/api/transfer/remove") {
-        handle_api_transfer_remove(client_socket, body);
-    } else if (method == "POST" && path == "/api/transfer/control") {
-        handle_api_transfer_control(client_socket, body);
-    } else if (method == "POST" && path == "/api/transfer/file/control") {
-        handle_api_transfer_file_control(client_socket, body);
-    } else if (method == "GET" && path == "/api/transfer/server_session") {
-        handle_api_transfer_server_session(client_socket, query_string);
-    } else if (method == "GET" && path == "/api/remote/check") {
-        handle_api_remote_check(client_socket);
-    } else if (method == "POST" && path == "/api/local/create_dir") {
-        handle_api_local_create_dir(client_socket, query_string);
-    } else if (method == "POST" && path == "/api/remote/create_dir") {
-        handle_api_remote_create_dir(client_socket, query_string);
-    } else {
-        send_error(client_socket, 404, "Not Found");
-    }
-
-    closesocket(sock);
-}
-
-void GuiServer::send_response(uint64_t client_socket, const std::string& status, const std::string& content_type, const std::string& body) {
+void GuiServer::send_response(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& status, const std::string& content_type, const std::string& body) {
     std::string response = "HTTP/1.1 " + status + "\r\n";
     response += "Content-Type: " + content_type + "; charset=utf-8\r\n";
     response += "Content-Length: " + std::to_string(body.length()) + "\r\n";
@@ -355,10 +327,13 @@ void GuiServer::send_response(uint64_t client_socket, const std::string& status,
     response += "Connection: close\r\n\r\n";
     response += body;
 
-    send(static_cast<SOCKET_TYPE>(client_socket), response.c_str(), static_cast<int>(response.length()), 0);
+    auto res = std::make_shared<std::string>(std::move(response));
+    asio::async_write(*socket, asio::buffer(*res), [res, socket](asio::error_code ec, std::size_t) {
+        socket->close(ec);
+    });
 }
 
-void GuiServer::send_error(uint64_t client_socket, int code, const std::string& message) {
+void GuiServer::send_error(std::shared_ptr<asio::ip::tcp::socket> socket, int code, const std::string& message) {
     std::string body = "{\"status\":\"error\",\"error\":\"" + escape_json(message) + "\"}";
     std::string status_str = std::to_string(code) + " ";
     if (code == 400) status_str += "Bad Request";
@@ -366,10 +341,10 @@ void GuiServer::send_error(uint64_t client_socket, int code, const std::string& 
     else if (code == 500) status_str += "Internal Server Error";
     else status_str += "Error";
 
-    send_response(client_socket, status_str, "application/json", body);
+    send_response(socket, status_str, "application/json", body);
 }
 
-void GuiServer::handle_api_drives(uint64_t client_socket) {
+void GuiServer::handle_api_drives(std::shared_ptr<asio::ip::tcp::socket> client_socket) {
     std::vector<std::string> drives;
 #ifdef _WIN32
     char drive_strings[256];
@@ -397,7 +372,7 @@ void GuiServer::handle_api_drives(uint64_t client_socket) {
     send_response(client_socket, "200 OK", "application/json", body);
 }
 
-void GuiServer::handle_api_local_list(uint64_t client_socket, const std::string& query) {
+void GuiServer::handle_api_local_list(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& query) {
     std::string path = get_query_param(query, "path");
     if (path.empty()) {
         send_error(client_socket, 400, "Missing path parameter");
@@ -450,7 +425,7 @@ void GuiServer::handle_api_local_list(uint64_t client_socket, const std::string&
     }
 }
 
-void GuiServer::handle_api_connect(uint64_t client_socket, const std::string& request_body) {
+void GuiServer::handle_api_connect(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
     std::string host = get_json_value(request_body, "host");
     std::string port_str = get_json_value(request_body, "port");
     std::string username = get_json_value(request_body, "username");
@@ -478,17 +453,17 @@ void GuiServer::handle_api_connect(uint64_t client_socket, const std::string& re
         conf.auto_create_directories = true;
         conf.create_empty_directories = true;
         if (!secret_key.empty()) {
-            conf.secret_key = secret_key;
+            conf.internal.secret_key = secret_key;
         }
 
         if (!username.empty()) {
-            conf.username = username;
-            conf.auth_method = auth_method;
-            conf.password = password;
-            conf.private_key_file = private_key_file;
-            conf.private_key_passphrase = private_key_passphrase;
+            conf.internal.username = username;
+            conf.internal.auth_method = auth_method;
+            conf.internal.password = password;
+            conf.internal.private_key_file = private_key_file;
+            conf.internal.private_key_passphrase = private_key_passphrase;
         } else {
-            conf.auth_method = "none";
+            conf.internal.auth_method = "none";
         }
 
         active_client_->set_config(conf);
@@ -578,7 +553,7 @@ void GuiServer::handle_api_connect(uint64_t client_socket, const std::string& re
     }
 }
 
-void GuiServer::handle_api_remote_list(uint64_t client_socket, const std::string& query) {
+void GuiServer::handle_api_remote_list(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& query) {
     std::string path = get_query_param(query, "path");
     if (path.empty()) {
         path = "/";
@@ -660,7 +635,7 @@ void GuiServer::handle_api_remote_list(uint64_t client_socket, const std::string
     }
 }
 
-void GuiServer::handle_api_transfer(uint64_t client_socket, const std::string& request_body) {
+void GuiServer::handle_api_transfer(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
     std::string direction = get_json_value(request_body, "direction");
     std::string local_path = get_json_value(request_body, "local_path");
     std::string remote_path = get_json_value(request_body, "remote_path");
@@ -1290,7 +1265,7 @@ void GuiServer::handle_api_transfer(uint64_t client_socket, const std::string& r
     send_response(client_socket, "200 OK", "application/json", resp_body);
 }
 
-void GuiServer::handle_api_transfers(uint64_t client_socket) {
+void GuiServer::handle_api_transfers(std::shared_ptr<asio::ip::tcp::socket> client_socket) {
     std::lock_guard<std::mutex> lock(transfers_mutex_);
     std::string body = "[";
     size_t count = 0;
@@ -1328,7 +1303,7 @@ void GuiServer::handle_api_transfers(uint64_t client_socket) {
     send_response(client_socket, "200 OK", "application/json", body);
 }
 
-void GuiServer::handle_api_transfer_status(uint64_t client_socket, const std::string& query) {
+void GuiServer::handle_api_transfer_status(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& query) {
     std::string id = get_query_param(query, "id");
     if (id.empty()) {
         bool active = transfer_active_;
@@ -1423,7 +1398,7 @@ void GuiServer::handle_api_transfer_status(uint64_t client_socket, const std::st
     send_response(client_socket, "200 OK", "application/json", body);
 }
 
-void GuiServer::handle_api_transfer_abort(uint64_t client_socket, const std::string& request_body) {
+void GuiServer::handle_api_transfer_abort(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
     std::string id = get_json_value(request_body, "id");
     if (id.empty()) {
         std::lock_guard<std::mutex> lock(client_mutex_);
@@ -1458,7 +1433,7 @@ void GuiServer::handle_api_transfer_abort(uint64_t client_socket, const std::str
     send_response(client_socket, "200 OK", "application/json", "{\"success\":true}");
 }
 
-void GuiServer::handle_api_transfer_minimize(uint64_t client_socket, const std::string& request_body) {
+void GuiServer::handle_api_transfer_minimize(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
     std::string id = get_json_value(request_body, "id");
     std::string minimized_str = get_json_value(request_body, "minimized");
     bool minimized = (minimized_str == "true");
@@ -1486,7 +1461,7 @@ void GuiServer::handle_api_transfer_minimize(uint64_t client_socket, const std::
     send_response(client_socket, "200 OK", "application/json", "{\"success\":true}");
 }
 
-void GuiServer::handle_api_transfer_file_control(uint64_t client_socket, const std::string& request_body) {
+void GuiServer::handle_api_transfer_file_control(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
     std::string id = get_json_value(request_body, "id");
     std::string path = get_json_value(request_body, "path");
     std::string action = get_json_value(request_body, "action"); // "pause", "resume", "skip", "start", "overwrite", "re-transfer"
@@ -1691,7 +1666,7 @@ std::vector<std::string> GuiServer::get_json_array(const std::string& json, cons
     return result;
 }
 
-void GuiServer::handle_api_transfer_remove(uint64_t client_socket, const std::string& request_body) {
+void GuiServer::handle_api_transfer_remove(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
     std::string id = get_json_value(request_body, "id");
     if (id.empty()) {
         send_error(client_socket, 400, "Missing transfer ID");
@@ -1717,7 +1692,7 @@ void GuiServer::handle_api_transfer_remove(uint64_t client_socket, const std::st
     send_response(client_socket, "200 OK", "application/json", "{\"success\":true}");
 }
 
-void GuiServer::handle_api_transfer_control(uint64_t client_socket, const std::string& request_body) {
+void GuiServer::handle_api_transfer_control(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
     std::string id = get_json_value(request_body, "id");
     std::string action = get_json_value(request_body, "action"); // "pause", "resume", "overwrite_all", "overwrite_resume_all", "start_all"
 
@@ -1821,7 +1796,7 @@ void GuiServer::handle_api_transfer_control(uint64_t client_socket, const std::s
     send_response(client_socket, "200 OK", "application/json", "{\"success\":true}");
 }
 
-void GuiServer::handle_api_transfer_server_session(uint64_t client_socket, const std::string& query) {
+void GuiServer::handle_api_transfer_server_session(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& query) {
     std::string id = get_query_param(query, "id");
     if (id.empty()) {
         send_error(client_socket, 400, "Missing transfer ID");
@@ -1940,7 +1915,7 @@ void GuiServer::handle_api_transfer_server_session(uint64_t client_socket, const
     }
 }
 
-void GuiServer::handle_api_remote_check(uint64_t client_socket) {
+void GuiServer::handle_api_remote_check(std::shared_ptr<asio::ip::tcp::socket> client_socket) {
     bool connected = false;
     std::string host;
     uint16_t port = 0;
@@ -1974,7 +1949,7 @@ void GuiServer::handle_api_remote_check(uint64_t client_socket) {
     send_response(client_socket, "200 OK", "application/json", body);
 }
 
-void GuiServer::handle_api_disconnect(uint64_t client_socket) {
+void GuiServer::handle_api_disconnect(std::shared_ptr<asio::ip::tcp::socket> client_socket) {
     {
         std::lock_guard<std::mutex> lock(client_mutex_);
         remote_connected_ = false;
@@ -1988,7 +1963,7 @@ void GuiServer::handle_api_disconnect(uint64_t client_socket) {
     send_response(client_socket, "200 OK", "application/json", "{\"success\":true}");
 }
 
-void GuiServer::handle_api_local_create_dir(uint64_t client_socket, const std::string& query) {
+void GuiServer::handle_api_local_create_dir(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& query) {
     std::string parent = get_query_param(query, "path");
     std::string name = get_query_param(query, "name");
     
@@ -2012,7 +1987,7 @@ void GuiServer::handle_api_local_create_dir(uint64_t client_socket, const std::s
     }
 }
 
-void GuiServer::handle_api_remote_create_dir(uint64_t client_socket, const std::string& query) {
+void GuiServer::handle_api_remote_create_dir(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& query) {
     std::string parent = get_query_param(query, "path");
     std::string name = get_query_param(query, "name");
     
@@ -2037,6 +2012,297 @@ void GuiServer::handle_api_remote_create_dir(uint64_t client_socket, const std::
         send_response(client_socket, "200 OK", "application/json", "{\"success\":true}");
     } catch (const std::exception& e) {
         send_response(client_socket, "200 OK", "application/json", "{\"success\":false,\"error\":\"" + escape_json(e.what()) + "\"}");
+    }
+}
+
+void GuiServer::handle_api_profiles(std::shared_ptr<asio::ip::tcp::socket> client_socket) {
+    try {
+        std::string config_file = "client.conf";
+        if (!file::FileManager::exists(config_file)) {
+            config_file = common::get_default_config_path("client.conf");
+        }
+        
+        std::string resp = "[";
+        if (file::FileManager::exists(config_file)) {
+            config::ConfigParser parser;
+            parser.load_from_file(config_file);
+            std::vector<std::string> sections = parser.get_sections();
+            bool first = true;
+            for (const auto& sec : sections) {
+                if (sec.rfind("profile:", 0) == 0) {
+                    std::string profile_name = sec.substr(8);
+                    if (!first) resp += ",";
+                    first = false;
+                    resp += "{";
+                    resp += "\"name\":\"" + escape_json(profile_name) + "\",";
+                    resp += "\"host\":\"" + escape_json(parser.get_string(sec, "host", "")) + "\",";
+                    resp += "\"port\":" + std::to_string(parser.get_int(sec, "port", 1245)) + ",";
+                    resp += "\"username\":\"" + escape_json(parser.get_string(sec, "username", "")) + "\",";
+                    resp += "\"security_level\":\"" + escape_json(parser.get_string(sec, "security_level", "high")) + "\"";
+                    resp += "}";
+                }
+            }
+        }
+        resp += "]";
+        send_response(client_socket, "200 OK", "application/json", resp);
+    } catch (const std::exception& e) {
+        send_response(client_socket, "200 OK", "application/json", "{\"success\":false,\"error\":\"" + escape_json(e.what()) + "\"}");
+    }
+}
+
+void GuiServer::handle_api_profiles_save(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
+    try {
+        std::string name = get_json_value(request_body, "name");
+        std::string host = get_json_value(request_body, "host");
+        std::string port_str = get_json_value(request_body, "port");
+        std::string username = get_json_value(request_body, "username");
+        std::string password = get_json_value(request_body, "password");
+        std::string security_level = get_json_value(request_body, "security_level");
+        
+        if (name.empty()) {
+            send_response(client_socket, "200 OK", "application/json", "{\"success\":false,\"error\":\"Profile name is required\"}");
+            return;
+        }
+        
+        std::string config_file = "client.conf";
+        if (!file::FileManager::exists(config_file)) {
+            config_file = common::get_default_config_path("client.conf");
+        }
+        
+        config::ConfigParser parser;
+        if (file::FileManager::exists(config_file)) {
+            parser.load_from_file(config_file);
+        }
+        
+        std::string section = "profile:" + name;
+        if (!host.empty()) parser.set_string(section, "host", host);
+        if (!port_str.empty()) {
+            try {
+                parser.set_int(section, "port", std::stoi(port_str));
+            } catch (...) {
+                parser.set_int(section, "port", 1245);
+            }
+        }
+        if (!username.empty()) parser.set_string(section, "username", username);
+        if (!password.empty()) parser.set_string(section, "password", password);
+        if (!security_level.empty()) parser.set_string(section, "security_level", security_level);
+        
+        parser.save_to_file(config_file);
+        send_response(client_socket, "200 OK", "application/json", "{\"success\":true}");
+    } catch (const std::exception& e) {
+        send_response(client_socket, "200 OK", "application/json", "{\"success\":false,\"error\":\"" + escape_json(e.what()) + "\"}");
+    }
+}
+
+void GuiServer::handle_api_profiles_delete(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
+    try {
+        std::string name = get_json_value(request_body, "name");
+        if (name.empty()) {
+            send_response(client_socket, "200 OK", "application/json", "{\"success\":false,\"error\":\"Profile name is required\"}");
+            return;
+        }
+        
+        std::string config_file = "client.conf";
+        if (!file::FileManager::exists(config_file)) {
+            config_file = common::get_default_config_path("client.conf");
+        }
+        
+        config::ConfigParser parser;
+        if (file::FileManager::exists(config_file)) {
+            parser.load_from_file(config_file);
+            std::string section = "profile:" + name;
+            parser.delete_section(section);
+            parser.save_to_file(config_file);
+        }
+        send_response(client_socket, "200 OK", "application/json", "{\"success\":true}");
+    } catch (const std::exception& e) {
+        send_response(client_socket, "200 OK", "application/json", "{\"success\":false,\"error\":\"" + escape_json(e.what()) + "\"}");
+    }
+}
+
+void GuiServer::handle_api_share_create(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& request_body) {
+    std::string file_path = get_json_value(request_body, "file_path");
+    std::string expiry_str = get_json_value(request_body, "expiry_seconds");
+    std::string max_dl_str = get_json_value(request_body, "max_downloads");
+
+    if (file_path.empty()) {
+        send_response(client_socket, "400 Bad Request", "application/json", "{\"status\":\"error\",\"error\":\"Missing file_path\"}");
+        return;
+    }
+
+    uint64_t expiry_seconds = 3600; // default 1 hour
+    if (!expiry_str.empty()) {
+        try {
+            expiry_seconds = std::stoull(expiry_str);
+        } catch (...) {}
+    }
+
+    int max_downloads = 0;
+    if (!max_dl_str.empty()) {
+        try {
+            max_downloads = std::stoi(max_dl_str);
+        } catch (...) {}
+    }
+
+    uint64_t expires_at = 0;
+    if (expiry_seconds > 0) {
+        uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        expires_at = now + expiry_seconds;
+    }
+
+    std::string token = common::to_hex_string(common::generate_random_bytes(16));
+
+    SharedLink link;
+    link.token = token;
+    link.file_path = file_path;
+    link.expires_at = expires_at;
+    link.download_count = 0;
+    link.max_downloads = max_downloads;
+
+    {
+        std::lock_guard<std::mutex> lock(share_mutex_);
+        shared_links_[token] = link;
+    }
+
+    std::string share_url = "http://127.0.0.1:" + std::to_string(port_) + "/shared/" + token;
+
+    std::string body = "{\"status\":\"success\",";
+    body += "\"token\":\"" + token + "\",";
+    body += "\"share_url\":\"" + share_url + "\",";
+    body += "\"expires_at\":" + std::to_string(expires_at) + "}";
+
+    send_response(client_socket, "200 OK", "application/json", body);
+}
+
+void GuiServer::handle_api_share_list(std::shared_ptr<asio::ip::tcp::socket> client_socket) {
+    std::string body = "{\"status\":\"success\",\"links\":[";
+    
+    uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    bool first = true;
+    {
+        std::lock_guard<std::mutex> lock(share_mutex_);
+        // Clean up expired links on list request
+        for (auto it = shared_links_.begin(); it != shared_links_.end(); ) {
+            if (it->second.expires_at > 0 && now > it->second.expires_at) {
+                it = shared_links_.erase(it);
+            } else {
+                if (!first) body += ",";
+                body += "{";
+                body += "\"token\":\"" + it->second.token + "\",";
+                body += "\"file_path\":\"" + escape_json(it->second.file_path) + "\",";
+                body += "\"expires_at\":" + std::to_string(it->second.expires_at) + ",";
+                body += "\"download_count\":" + std::to_string(it->second.download_count) + ",";
+                body += "\"max_downloads\":" + std::to_string(it->second.max_downloads);
+                body += "}";
+                first = false;
+                ++it;
+            }
+        }
+    }
+    body += "]}";
+
+    send_response(client_socket, "200 OK", "application/json", body);
+}
+
+void GuiServer::handle_shared_download(std::shared_ptr<asio::ip::tcp::socket> client_socket, const std::string& token) {
+    SharedLink link;
+    bool found = false;
+    {
+        std::lock_guard<std::mutex> lock(share_mutex_);
+        auto it = shared_links_.find(token);
+        if (it != shared_links_.end()) {
+            link = it->second;
+            found = true;
+        }
+    }
+
+    if (!found) {
+        send_error(client_socket, 404, "Share link not found or expired");
+        return;
+    }
+
+    // Check expiration
+    uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    if (link.expires_at > 0 && now > link.expires_at) {
+        {
+            std::lock_guard<std::mutex> lock(share_mutex_);
+            shared_links_.erase(token);
+        }
+        send_error(client_socket, 410, "Share link has expired");
+        return;
+    }
+
+    // Check max downloads
+    if (link.max_downloads > 0 && link.download_count >= link.max_downloads) {
+        send_error(client_socket, 403, "Maximum download limit reached for this link");
+        return;
+    }
+
+    // Check if file exists
+    std::string native_path = common::convert_to_native_path(link.file_path);
+    if (!file::FileManager::exists(native_path) || file::FileManager::is_directory(native_path)) {
+        send_error(client_socket, 404, "File not found or is a directory");
+        return;
+    }
+
+    uint64_t file_size = file::FileManager::file_size(native_path);
+    
+    // Increment download count
+    {
+        std::lock_guard<std::mutex> lock(share_mutex_);
+        auto it = shared_links_.find(token);
+        if (it != shared_links_.end()) {
+            it->second.download_count++;
+        }
+    }
+
+    // Extract filename from file_path
+    std::string filename = "";
+    size_t slash_pos = native_path.find_last_of("/\\");
+    if (slash_pos != std::string::npos) {
+        filename = native_path.substr(slash_pos + 1);
+    } else {
+        filename = native_path;
+    }
+
+    // Send HTTP Headers
+    std::string headers = "HTTP/1.1 200 OK\r\n";
+    headers += "Content-Type: application/octet-stream\r\n";
+    headers += "Content-Length: " + std::to_string(file_size) + "\r\n";
+    headers += "Content-Disposition: attachment; filename=\"" + filename + "\"\r\n";
+    headers += "Access-Control-Allow-Origin: *\r\n";
+    headers += "Connection: close\r\n\r\n";
+
+    asio::error_code ec;
+    asio::write(*client_socket, asio::buffer(headers), ec);
+    if (ec) return;
+
+    // Stream the file in chunks
+    file::FileStream fs;
+    if (fs.open_read(native_path)) {
+        const size_t CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+        std::vector<char> buffer(CHUNK_SIZE);
+        uint64_t offset = 0;
+        while (offset < file_size) {
+            size_t to_read = static_cast<size_t>((std::min)(static_cast<uint64_t>(CHUNK_SIZE), file_size - offset));
+            size_t bytes_read = fs.read(offset, reinterpret_cast<uint8_t*>(buffer.data()), to_read);
+            if (bytes_read == 0) {
+                break;
+            }
+            
+            // Send chunk to socket
+            asio::write(*client_socket, asio::buffer(buffer.data(), bytes_read), ec);
+            if (ec) {
+                break;
+            }
+            
+            offset += bytes_read;
+        }
+        fs.close();
     }
 }
 
