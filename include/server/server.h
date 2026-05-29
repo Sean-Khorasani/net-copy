@@ -12,6 +12,11 @@
 #include <thread>
 #include <atomic>
 #include <vector>
+#include <mutex>
+#include "network/event_loop.h"
+#include "auth/auth_engine.h"
+#include "network/ssh_server.h"
+#include <asio.hpp>
 
 namespace netcopy {
 namespace server {
@@ -46,6 +51,7 @@ private:
     std::string current_symlink_target_;
     uint32_t current_permissions_ = 0;
     uint64_t current_expected_file_size_ = 0;
+    uint64_t current_expected_last_modified_ = 0;
     // Auth state
     auth::UserDb user_db_;
     std::string authenticated_user_;
@@ -81,6 +87,7 @@ private:
     // Utility functions
     uint32_t get_next_sequence_number();
     std::string get_client_address();
+    void trigger_webhook(const std::string& action, const std::string& source, const std::string& destination, const std::string& status, uint64_t bytes, const std::string& error_msg = "", uint32_t files_transferred = 1);
 };
 
 class Server {
@@ -100,20 +107,29 @@ public:
     
     // Daemon operations
     void run_as_daemon();
+    
+    // Relay operations
+    void run_relay_client(const std::string& relay_address, const std::string& token);
+    void run_relay_server(const std::string& listen_address);
 
 private:
-    std::unique_ptr<network::Socket> listen_socket_;
+    std::unique_ptr<network::EventLoop> event_loop_;
+    std::unique_ptr<asio::ip::tcp::acceptor> acceptor_;
     config::ServerConfig config_;
     std::shared_ptr<crypto::ChaCha20Poly1305> crypto_;
     std::atomic<bool> running_;
+    auth::UserDb user_db_;
+    std::unique_ptr<auth::AuthEngine> auth_engine_;
+    std::unique_ptr<network::SshServer> ssh_server_;
     
     struct WorkerThread {
         std::thread thread;
         std::shared_ptr<std::atomic<bool>> finished;
     };
     std::vector<WorkerThread> worker_threads_;
+    std::mutex worker_threads_mutex_;
     
-    void accept_connections();
+    void do_accept();
     void handle_client(network::Socket client_socket);
     void cleanup_threads(bool force_join_all = false);
 };
