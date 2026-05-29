@@ -1,6 +1,8 @@
 #pragma once
 
 #include "network/socket.h"
+#include "network/async_socket.h"
+#include "network/event_loop.h"
 #include "crypto/chacha20_poly1305.h"
 #include "crypto/crypto_engine.h"
 #include "config/config_parser.h"
@@ -32,6 +34,44 @@ public:
 
         AlignedBuffer(uint8_t* p, size_t cap, BufferPool* pl)
             : ptr(p), size_(cap), capacity_(cap), pool(pl) {}
+
+        // Delete copy operations
+        AlignedBuffer(const AlignedBuffer&) = delete;
+        AlignedBuffer& operator=(const AlignedBuffer&) = delete;
+
+        // Implement move operations
+        AlignedBuffer(AlignedBuffer&& other) noexcept
+            : ptr(other.ptr), size_(other.size_), capacity_(other.capacity_), pool(other.pool) {
+            other.ptr = nullptr;
+            other.pool = nullptr;
+            other.size_ = 0;
+            other.capacity_ = 0;
+        }
+
+        AlignedBuffer& operator=(AlignedBuffer&& other) noexcept {
+            if (this != &other) {
+                if (ptr) {
+                    if (pool) {
+                        pool->deallocate(ptr);
+                    } else {
+                        #if defined(_MSC_VER) || defined(__MINGW32__)
+                        _aligned_free(ptr);
+                        #else
+                        free(ptr);
+                        #endif
+                    }
+                }
+                ptr = other.ptr;
+                size_ = other.size_;
+                capacity_ = other.capacity_;
+                pool = other.pool;
+                other.ptr = nullptr;
+                other.pool = nullptr;
+                other.size_ = 0;
+                other.capacity_ = 0;
+            }
+            return *this;
+        }
 
         ~AlignedBuffer() {
             if (ptr && pool) {
@@ -154,6 +194,7 @@ public:
     
     // Connection management
     void connect(const std::string& server_address, uint16_t port);
+    void connect_via_relay(const std::string& relay_address, const std::string& token);
     void disconnect();
     bool is_connected() const;
     
@@ -208,6 +249,9 @@ public:
 
 private:
     std::unique_ptr<network::Socket> socket_;
+    std::shared_ptr<network::EventLoop> event_loop_;
+    std::shared_ptr<network::AsyncSocket> async_socket_;
+    std::unique_ptr<asio::ssl::context> ssl_ctx_;
     std::unique_ptr<crypto::ChaCha20Poly1305> crypto_;
     std::unique_ptr<crypto::CryptoEngine> crypto_engine_;
     config::ClientConfig config_; 
@@ -260,6 +304,7 @@ private:
     void set_error(const std::string& error);
     void clear_error();
     uint32_t get_next_sequence_number();
+    void trigger_webhook(const std::string& action, const std::string& source, const std::string& destination, const std::string& status, uint64_t bytes, const std::string& error_msg = "", uint32_t files_transferred = 1);
 
     // Adaptive chunk size management
     common::ChunkSizeManager chunk_size_manager_;
