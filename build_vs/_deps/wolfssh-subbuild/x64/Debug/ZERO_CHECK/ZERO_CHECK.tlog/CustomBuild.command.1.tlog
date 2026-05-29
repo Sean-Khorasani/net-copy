@@ -1,0 +1,10 @@
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\WOLFSSH-SUBBUILD\CMAKEFILES\AF0726BE18A3A33A8DAC5509E970EC40\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/src/net_copy/build_vs/_deps/wolfssh-subbuild -BD:/src/net_copy/build_vs/_deps/wolfssh-subbuild --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/wolfssh-populate.slnx
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

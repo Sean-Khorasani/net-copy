@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\liboqs-subbuild\CMakeFiles\e27d9a129858b83fe0e29ac8d0486984\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{8B57A44F-AC4A-3F1C-B5A0-208D1B77BF41}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,152 @@
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\F4CA1D1E0120284F16234A0E1EB6AAFE\ASIO-POPULATE-MKDIR.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -Dcfgdir=/Debug -P D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/tmp/asio-populate-mkdirs.cmake
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-mkdir
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\F4CA1D1E0120284F16234A0E1EB6AAFE\ASIO-POPULATE-DOWNLOAD.RULE
+setlocal
+cd D:\src\net_copy\build_vs\_deps
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/tmp/asio-populate-gitclone.cmake
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-download
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\F4CA1D1E0120284F16234A0E1EB6AAFE\ASIO-POPULATE-UPDATE_DISCONNECTED.RULE
+setlocal
+cd D:\src\net_copy\build_vs\_deps\asio-src
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -Dcan_fetch=NO -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE -P D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/tmp/asio-populate-gitupdate.cmake
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-update_disconnected
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\F4CA1D1E0120284F16234A0E1EB6AAFE\ASIO-POPULATE-PATCH_DISCONNECTED.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-patch_disconnected
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\F4CA1D1E0120284F16234A0E1EB6AAFE\ASIO-POPULATE-CONFIGURE.RULE
+setlocal
+cd D:\src\net_copy\build_vs\_deps\asio-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-configure
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\F4CA1D1E0120284F16234A0E1EB6AAFE\ASIO-POPULATE-BUILD.RULE
+setlocal
+cd D:\src\net_copy\build_vs\_deps\asio-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-build
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\F4CA1D1E0120284F16234A0E1EB6AAFE\ASIO-POPULATE-INSTALL.RULE
+setlocal
+cd D:\src\net_copy\build_vs\_deps\asio-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-install
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\F4CA1D1E0120284F16234A0E1EB6AAFE\ASIO-POPULATE-TEST.RULE
+setlocal
+cd D:\src\net_copy\build_vs\_deps\asio-build
+if %errorlevel% neq 0 goto :cmEnd
+D:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E echo_append
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-test
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\CD958D8F11B95DF76A08A436D2D0692D\ASIO-POPULATE-COMPLETE.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -E make_directory D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/Debug
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/Debug/asio-populate-complete
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E touch D:/src/net_copy/build_vs/_deps/asio-subbuild/asio-populate-prefix/src/asio-populate-stamp/Debug/asio-populate-done
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKEFILES\BE32CA6404CFABC2DA7AA5068C36FCA4\ASIO-POPULATE.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\ASIO-SUBBUILD\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/src/net_copy/build_vs/_deps/asio-subbuild -BD:/src/net_copy/build_vs/_deps/asio-subbuild --check-stamp-file D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

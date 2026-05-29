@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\wolfssh-subbuild\CMakeFiles\af0726be18a3a33a8dac5509e970ec40\generate.stamp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{BB0303A0-34EC-32D9-BFE5-E0EF04075847}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

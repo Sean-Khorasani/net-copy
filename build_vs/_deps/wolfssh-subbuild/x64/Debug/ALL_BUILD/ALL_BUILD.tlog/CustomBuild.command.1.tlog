@@ -1,0 +1,10 @@
+^D:\SRC\NET_COPY\BUILD_VS\_DEPS\WOLFSSH-SUBBUILD\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SD:/src/net_copy/build_vs/_deps/wolfssh-subbuild -BD:/src/net_copy/build_vs/_deps/wolfssh-subbuild --check-stamp-file D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

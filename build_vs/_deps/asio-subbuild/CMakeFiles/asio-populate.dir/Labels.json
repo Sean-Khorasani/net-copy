@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/asio-populate"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/be32ca6404cfabc2da7aa5068c36fca4/asio-populate.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/cd958d8f11b95df76a08a436d2d0692d/asio-populate-complete.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-build.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-configure.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-download.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-install.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-mkdir.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-patch_disconnected.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-test.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-update_disconnected.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"asio-populate"
+		],
+		"name" : "asio-populate"
+	}
+}

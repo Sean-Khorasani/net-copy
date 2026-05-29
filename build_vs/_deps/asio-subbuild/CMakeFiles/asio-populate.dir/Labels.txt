@@ -1,0 +1,14 @@
+# Target labels
+ asio-populate
+# Source files and their labels
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/asio-populate
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/be32ca6404cfabc2da7aa5068c36fca4/asio-populate.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/cd958d8f11b95df76a08a436d2d0692d/asio-populate-complete.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-build.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-configure.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-download.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-install.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-mkdir.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-patch_disconnected.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-test.rule
+D:/src/net_copy/build_vs/_deps/asio-subbuild/CMakeFiles/f4ca1d1e0120284f16234a0e1eb6aafe/asio-populate-update_disconnected.rule

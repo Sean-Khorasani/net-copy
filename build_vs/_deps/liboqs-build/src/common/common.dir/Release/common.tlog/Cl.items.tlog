@@ -1,0 +1,16 @@
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\aes\aes_impl.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\aes_impl.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\aes\aes_c.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\aes_c.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\aes\aes128_ni.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\aes128_ni.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\aes\aes256_ni.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\aes256_ni.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\aes\aes.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\aes.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\sha2\sha2_impl.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\sha2_impl.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\sha2\sha2_c.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\sha2_c.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\sha2\sha2.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\sha2.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\sha3\xkcp_sha3.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\xkcp_sha3.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\sha3\xkcp_sha3x4.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\xkcp_sha3x4.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\sha3\sha3.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\sha3.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\sha3\sha3x4.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\sha3x4.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\common.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\common.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\pqclean_shims\fips202.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\fips202.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\pqclean_shims\fips202x4.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\fips202x4.obj
+D:\src\net_copy\build_vs\_deps\liboqs-src\src\common\rand\rand.c;D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\common.dir\Release\rand.obj

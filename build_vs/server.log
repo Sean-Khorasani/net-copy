@@ -1,0 +1,1031 @@
+[2026-05-28 16:26:36.847] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:26:36.848] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:26:55.512] [ERROR] Failed to initialize crypto with secret key: Invalid secret key length. Expected 64 hex characters (32 bytes), got 34
+[2026-05-28 16:26:55.513] [ERROR] Failed to load configuration: Invalid secret key length. Expected 64 hex characters (32 bytes), got 34
+[2026-05-28 16:26:59.509] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:26:59.509] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:26:59.509] [INFO] Starting NetCopy server...
+[2026-05-28 16:26:59.510] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:26:59.519] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:26:59.520] [INFO] Allowed paths:
+[2026-05-28 16:26:59.520] [INFO]   - \var\lib\net_copy
+[2026-05-28 16:27:11.693] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:27:11.693] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:27:11.693] [INFO] Starting NetCopy server...
+[2026-05-28 16:27:11.694] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:27:11.694] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:27:11.694] [INFO] Allowed paths:
+[2026-05-28 16:27:11.695] [INFO]   - test_server_root
+[2026-05-28 16:27:20.226] [INFO] Handling connection from 127.0.0.1:30288
+[2026-05-28 16:27:20.227] [INFO] Enabling TLS server-side for 127.0.0.1:30288
+[2026-05-28 16:27:20.242] [INFO] Performing TLS handshake for 127.0.0.1:30288
+[2026-05-28 16:27:54.977] [INFO] Handling connection from 127.0.0.1:42825
+[2026-05-28 16:27:54.977] [INFO] Enabling TLS server-side for 127.0.0.1:42825
+[2026-05-28 16:27:54.978] [INFO] Performing TLS handshake for 127.0.0.1:42825
+[2026-05-28 16:27:55.000] [INFO] TLS handshake completed successfully for 127.0.0.1:42825
+[2026-05-28 16:27:55.000] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-28 16:27:55.001] [ERROR] Connection error with 127.0.0.1:42825: Auth error: Authentication required, but user database could not be loaded
+[2026-05-28 16:27:55.002] [INFO] Connection closed with 127.0.0.1:42825
+[2026-05-28 16:28:05.420] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:28:05.420] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:28:05.421] [INFO] Starting NetCopy server...
+[2026-05-28 16:28:05.421] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:28:05.422] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:28:05.423] [INFO] Allowed paths:
+[2026-05-28 16:28:05.423] [INFO]   - test_server_root
+[2026-05-28 16:28:11.835] [INFO] Handling connection from 127.0.0.1:42831
+[2026-05-28 16:28:11.836] [INFO] Enabling TLS server-side for 127.0.0.1:42831
+[2026-05-28 16:28:11.837] [INFO] Performing TLS handshake for 127.0.0.1:42831
+[2026-05-28 16:28:11.849] [INFO] TLS handshake completed successfully for 127.0.0.1:42831
+[2026-05-28 16:28:11.850] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-28 16:28:11.850] [ERROR] Connection error with 127.0.0.1:42831: Auth error: Authentication required, but user database could not be loaded
+[2026-05-28 16:28:11.850] [INFO] Connection closed with 127.0.0.1:42831
+[2026-05-28 16:28:21.431] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:28:21.432] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:28:21.432] [INFO] Starting NetCopy server...
+[2026-05-28 16:28:21.432] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:28:21.433] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:28:21.433] [INFO] Allowed paths:
+[2026-05-28 16:28:21.433] [INFO]   - test_server_root
+[2026-05-28 16:28:28.043] [INFO] Handling connection from 127.0.0.1:7231
+[2026-05-28 16:28:28.043] [INFO] Enabling TLS server-side for 127.0.0.1:7231
+[2026-05-28 16:28:28.044] [INFO] Performing TLS handshake for 127.0.0.1:7231
+[2026-05-28 16:28:28.063] [INFO] TLS handshake completed successfully for 127.0.0.1:7231
+[2026-05-28 16:28:28.064] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-28 16:28:28.064] [INFO] Handshake completed with 127.0.0.1:7231
+[2026-05-28 16:28:28.064] [ERROR] Connection error with 127.0.0.1:7231: Crypto error: Authentication failed
+[2026-05-28 16:28:28.065] [INFO] Connection closed with 127.0.0.1:7231
+[2026-05-28 16:28:42.116] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:28:42.117] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:28:42.117] [INFO] Starting NetCopy server...
+[2026-05-28 16:28:42.117] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:28:42.118] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:28:42.118] [INFO] Allowed paths:
+[2026-05-28 16:28:42.118] [INFO]   - test_server_root
+[2026-05-28 16:28:50.227] [INFO] Handling connection from 127.0.0.1:7232
+[2026-05-28 16:28:50.227] [INFO] Enabling TLS server-side for 127.0.0.1:7232
+[2026-05-28 16:28:50.230] [INFO] Performing TLS handshake for 127.0.0.1:7232
+[2026-05-28 16:28:50.247] [INFO] TLS handshake completed successfully for 127.0.0.1:7232
+[2026-05-28 16:28:50.247] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-28 16:28:50.248] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-28 16:28:50.248] [DEBUG] Derived dynamic session key with nonces
+[2026-05-28 16:28:50.248] [INFO] Handshake completed with 127.0.0.1:7232
+[2026-05-28 16:28:50.249] [INFO] File request from 127.0.0.1:7232: test_client_root\test.txt -> \test_server_root\
+[2026-05-28 16:28:50.249] [DEBUG] Checking path access: '/test_server_root/' -> '\test_server_root\' -> '\test_server_root\'
+[2026-05-28 16:28:50.250] [DEBUG] Checking against allowed path: 'test_server_root'
+[2026-05-28 16:28:50.250] [DEBUG] Path denied - not within any allowed path
+[2026-05-28 16:28:50.251] [ERROR] File request error: File error: Access denied to path: /test_server_root/
+[2026-05-28 16:28:50.251] [INFO] Client 127.0.0.1:7232 disconnected gracefully
+[2026-05-28 16:28:52.578] [INFO] Handling connection from 127.0.0.1:21565
+[2026-05-28 16:28:52.578] [INFO] Enabling TLS server-side for 127.0.0.1:21565
+[2026-05-28 16:28:52.578] [INFO] Performing TLS handshake for 127.0.0.1:21565
+[2026-05-28 16:28:52.613] [INFO] TLS handshake completed successfully for 127.0.0.1:21565
+[2026-05-28 16:28:52.613] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-28 16:28:52.613] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-28 16:28:52.614] [DEBUG] Derived dynamic session key with nonces
+[2026-05-28 16:28:52.614] [INFO] Handshake completed with 127.0.0.1:21565
+[2026-05-28 16:28:52.615] [INFO] File request from 127.0.0.1:21565: test_client_root\test.txt -> \
+[2026-05-28 16:28:52.616] [DEBUG] Checking path access: '/' -> '\' -> '\'
+[2026-05-28 16:28:52.616] [DEBUG] Checking against allowed path: 'test_server_root'
+[2026-05-28 16:28:52.617] [DEBUG] Path denied - not within any allowed path
+[2026-05-28 16:28:52.617] [ERROR] File request error: File error: Access denied to path: /
+[2026-05-28 16:28:52.618] [INFO] Client 127.0.0.1:21565 disconnected gracefully
+[2026-05-28 16:29:04.325] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:29:04.325] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:29:04.325] [INFO] Starting NetCopy server...
+[2026-05-28 16:29:04.326] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:29:04.326] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:29:04.326] [INFO] Allowed paths:
+[2026-05-28 16:29:04.327] [INFO]   - D:\src\net_copy\build_vs\test_server_root
+[2026-05-28 16:29:11.070] [INFO] Handling connection from 127.0.0.1:21566
+[2026-05-28 16:29:11.070] [INFO] Enabling TLS server-side for 127.0.0.1:21566
+[2026-05-28 16:29:11.078] [INFO] Performing TLS handshake for 127.0.0.1:21566
+[2026-05-28 16:29:11.093] [INFO] TLS handshake completed successfully for 127.0.0.1:21566
+[2026-05-28 16:29:11.093] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-28 16:29:11.094] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-28 16:29:11.094] [DEBUG] Derived dynamic session key with nonces
+[2026-05-28 16:29:11.094] [INFO] Handshake completed with 127.0.0.1:21566
+[2026-05-28 16:29:11.094] [INFO] File request from 127.0.0.1:21566: test_client_root\test.txt -> D:\src\net_copy\build_vs\test_server_root\
+[2026-05-28 16:29:11.094] [DEBUG] Checking path access: '/D:/src/net_copy/build_vs/test_server_root/' -> 'D:\src\net_copy\build_vs\test_server_root\' -> 'D:\src\net_copy\build_vs\test_server_root\'
+[2026-05-28 16:29:11.094] [DEBUG] Checking against allowed path: 'D:\src\net_copy\build_vs\test_server_root'
+[2026-05-28 16:29:11.095] [DEBUG] Path allowed by allowed_paths rule: 'D:\src\net_copy\build_vs\test_server_root'
+[2026-05-28 16:29:11.095] [DEBUG] Path conversion: '/D:/src/net_copy/build_vs/test_server_root/' -> 'D:\src\net_copy\build_vs\test_server_root\'
+[2026-05-28 16:29:11.095] [DEBUG] Setting current file path to: D:\src\net_copy\build_vs\test_server_root\test.txt
+[2026-05-28 16:29:11.095] [DEBUG] New file transfer for D:\src\net_copy\build_vs\test_server_root\test.txt
+[2026-05-28 16:29:11.096] [DEBUG] Writing 150 bytes at offset 0 to file: D:\src\net_copy\build_vs\test_server_root\test.txt
+[2026-05-28 16:29:11.096] [DEBUG] Successfully processed chunks, total bytes received: 151
+[2026-05-28 16:29:11.097] [INFO] Client 127.0.0.1:21566 disconnected gracefully
+[2026-05-28 16:31:35.938] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:31:35.938] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:31:35.939] [INFO] Starting NetCopy server...
+[2026-05-28 16:31:35.939] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:31:35.940] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:31:35.940] [INFO] Allowed paths:
+[2026-05-28 16:31:35.940] [INFO]   - D:\src\net_copy\build_vs\test_server_root
+[2026-05-28 16:31:50.423] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:31:50.423] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:31:50.424] [INFO] Starting NetCopy server...
+[2026-05-28 16:31:50.424] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:31:50.425] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:31:50.425] [INFO] Allowed paths:
+[2026-05-28 16:31:50.425] [INFO]   - D:\src\net_copy\build_vs\test_server_root
+[2026-05-28 16:32:23.541] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:32:23.542] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:32:23.542] [INFO] Starting NetCopy server...
+[2026-05-28 16:32:23.542] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:32:23.543] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:32:23.543] [INFO] Allowed paths:
+[2026-05-28 16:32:23.543] [INFO]   - D:\src\net_copy\build_vs\test_server_root
+[2026-05-28 16:33:38.776] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:33:38.777] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:33:38.777] [INFO] Starting NetCopy server...
+[2026-05-28 16:33:38.777] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:33:38.778] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:33:38.778] [INFO] Allowed paths:
+[2026-05-28 16:33:38.778] [INFO]   - D:\src\net_copy\build_vs\test_server_root
+[2026-05-28 16:34:28.646] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:34:28.646] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:34:28.646] [INFO] Starting NetCopy server...
+[2026-05-28 16:34:28.647] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:34:28.650] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:34:28.650] [INFO] Allowed paths:
+[2026-05-28 16:34:28.650] [INFO]   - D:\src\net_copy\build_vs\test_server_root
+[2026-05-28 16:35:23.933] [INFO] Server configuration loaded from: server.conf
+[2026-05-28 16:35:23.933] [INFO] Using server configuration from: server.conf
+[2026-05-28 16:35:23.933] [INFO] Starting NetCopy server...
+[2026-05-28 16:35:23.933] [INFO] EventLoop started with 10 worker threads.
+[2026-05-28 16:35:23.934] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-28 16:35:23.934] [INFO] Allowed paths:
+[2026-05-28 16:35:23.934] [INFO]   - D:\src\net_copy\build_vs\test_server_root
+[2026-05-28 16:35:45.068] [INFO] Handling connection from 127.0.0.1:25939
+[2026-05-28 16:35:45.068] [INFO] Enabling TLS server-side for 127.0.0.1:25939
+[2026-05-28 16:36:30.964] [ERROR] Connection error with 127.0.0.1:25939: bad allocation
+[2026-05-28 16:36:30.965] [INFO] Connection closed with 127.0.0.1:25939
+[2026-05-29 09:41:27.763] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 09:41:27.773] [INFO] Using server configuration from: server.conf
+[2026-05-29 09:41:27.774] [INFO] Starting NetCopy server...
+[2026-05-29 09:41:27.776] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 09:41:27.780] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 09:41:27.780] [INFO] Allowed paths:
+[2026-05-29 09:41:27.781] [INFO]   - \var\lib\net_copy
+[2026-05-29 09:59:03.268] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 09:59:03.269] [INFO] Using server configuration from: server.conf
+[2026-05-29 09:59:03.269] [INFO] Starting NetCopy server...
+[2026-05-29 09:59:03.269] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 09:59:03.270] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 09:59:03.271] [INFO] Allowed paths:
+[2026-05-29 09:59:03.271] [INFO]   - D:\src\net_copy\
+[2026-05-29 09:59:03.271] [INFO]   - D:\Work\
+[2026-05-29 10:03:49.014] [INFO] Handling connection from 127.0.0.1:62562
+[2026-05-29 10:03:49.014] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:03:49.014] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:03:49.015] [INFO] Handshake completed with 127.0.0.1:62562
+[2026-05-29 10:03:49.016] [ERROR] Connection error with 127.0.0.1:62562: Crypto error: Authentication failed
+[2026-05-29 10:03:49.017] [INFO] Connection closed with 127.0.0.1:62562
+[2026-05-29 10:04:31.429] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 10:04:31.429] [INFO] Using server configuration from: server.conf
+[2026-05-29 10:04:31.429] [INFO] Starting NetCopy server...
+[2026-05-29 10:04:31.430] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 10:04:31.431] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 10:04:31.431] [INFO] Allowed paths:
+[2026-05-29 10:04:31.431] [INFO]   - D:\src\net_copy\
+[2026-05-29 10:04:31.431] [INFO]   - D:\Work\
+[2026-05-29 10:04:37.862] [INFO] Handling connection from 127.0.0.1:47731
+[2026-05-29 10:04:37.863] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:04:37.863] [INFO] Handshake completed with 127.0.0.1:47731
+[2026-05-29 10:04:37.864] [ERROR] Connection error with 127.0.0.1:47731: Crypto error: Authentication failed
+[2026-05-29 10:04:37.864] [INFO] Connection closed with 127.0.0.1:47731
+[2026-05-29 10:05:03.971] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 10:05:03.972] [INFO] Using server configuration from: server.conf
+[2026-05-29 10:05:03.972] [INFO] Starting NetCopy server...
+[2026-05-29 10:05:03.972] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 10:05:03.973] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 10:05:03.974] [INFO] Allowed paths:
+[2026-05-29 10:05:03.974] [INFO]   - D:\src\net_copy\
+[2026-05-29 10:05:03.974] [INFO]   - D:\Work\
+[2026-05-29 10:05:06.791] [INFO] Handling connection from 127.0.0.1:47732
+[2026-05-29 10:05:06.791] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:05:06.792] [INFO] Handshake completed with 127.0.0.1:47732
+[2026-05-29 10:05:06.792] [ERROR] Connection error with 127.0.0.1:47732: Crypto error: Authentication failed
+[2026-05-29 10:05:06.792] [INFO] Connection closed with 127.0.0.1:47732
+[2026-05-29 10:06:14.980] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 10:06:14.980] [INFO] Using server configuration from: server.conf
+[2026-05-29 10:06:14.980] [INFO] Starting NetCopy server...
+[2026-05-29 10:06:14.981] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 10:06:14.982] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 10:06:14.982] [INFO] Allowed paths:
+[2026-05-29 10:06:14.982] [INFO]   - D:\src\net_copy\
+[2026-05-29 10:06:14.983] [INFO]   - D:\Work\
+[2026-05-29 10:06:21.574] [INFO] Handling connection from 127.0.0.1:38806
+[2026-05-29 10:06:21.574] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.575] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.576] [INFO] Handshake completed with 127.0.0.1:38806
+[2026-05-29 10:06:21.577] [INFO] File request from 127.0.0.1:38806: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 10:06:21.578] [INFO] File request from 127.0.0.1:38806: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 10:06:21.579] [INFO] File request from 127.0.0.1:38806: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 10:06:21.580] [INFO] Handling connection from 127.0.0.1:38807
+[2026-05-29 10:06:21.581] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.581] [INFO] Handling connection from 127.0.0.1:38809
+[2026-05-29 10:06:21.581] [INFO] Handling connection from 127.0.0.1:38810
+[2026-05-29 10:06:21.581] [INFO] Handling connection from 127.0.0.1:38808
+[2026-05-29 10:06:21.581] [INFO] Handling connection from 127.0.0.1:38811
+[2026-05-29 10:06:21.581] [INFO] Handling connection from 127.0.0.1:38812
+[2026-05-29 10:06:21.582] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.582] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.582] [INFO] Handling connection from 127.0.0.1:38814
+[2026-05-29 10:06:21.582] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.582] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.583] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.583] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.583] [INFO] Handling connection from 127.0.0.1:38813
+[2026-05-29 10:06:21.583] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.583] [INFO] Handshake completed with 127.0.0.1:38812
+[2026-05-29 10:06:21.583] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.583] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.584] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.584] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.584] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.584] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.584] [INFO] File request from 127.0.0.1:38812: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 10:06:21.584] [INFO] Handshake completed with 127.0.0.1:38809
+[2026-05-29 10:06:21.585] [INFO] Handshake completed with 127.0.0.1:38811
+[2026-05-29 10:06:21.585] [INFO] Handshake completed with 127.0.0.1:38807
+[2026-05-29 10:06:21.585] [INFO] Handshake completed with 127.0.0.1:38813
+[2026-05-29 10:06:21.585] [INFO] Handshake completed with 127.0.0.1:38810
+[2026-05-29 10:06:21.585] [INFO] File request from 127.0.0.1:38809: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 10:06:21.585] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 10:06:21.586] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 10:06:21.586] [INFO] File request from 127.0.0.1:38813: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 10:06:21.586] [INFO] Handshake completed with 127.0.0.1:38808
+[2026-05-29 10:06:21.586] [INFO] File request from 127.0.0.1:38807: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 10:06:21.586] [INFO] Handshake completed with 127.0.0.1:38814
+[2026-05-29 10:06:21.586] [INFO] File request from 127.0.0.1:38808: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 10:06:21.587] [INFO] File request from 127.0.0.1:38810: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 10:06:21.587] [INFO] File request from 127.0.0.1:38811: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 10:06:21.587] [INFO] File request from 127.0.0.1:38814: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 10:06:21.589] [INFO] File request from 127.0.0.1:38807: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 10:06:21.589] [INFO] Client 127.0.0.1:38812 disconnected gracefully
+[2026-05-29 10:06:21.589] [INFO] Client 127.0.0.1:38808 disconnected gracefully
+[2026-05-29 10:06:21.590] [INFO] Client 127.0.0.1:38809 disconnected gracefully
+[2026-05-29 10:06:21.590] [INFO] Client 127.0.0.1:38810 disconnected gracefully
+[2026-05-29 10:06:25.699] [ERROR] Connection error with 127.0.0.1:38806: Network error: Failed to receive data
+[2026-05-29 10:06:25.700] [ERROR] Connection error with 127.0.0.1:38811: Network error: Failed to receive data
+[2026-05-29 10:06:25.700] [ERROR] Connection error with 127.0.0.1:38807: Network error: Failed to receive data
+[2026-05-29 10:06:25.700] [INFO] Connection closed with 127.0.0.1:38806
+[2026-05-29 10:06:25.701] [ERROR] Connection error with 127.0.0.1:38814: Network error: Failed to receive data
+[2026-05-29 10:06:25.701] [INFO] Connection closed with 127.0.0.1:38811
+[2026-05-29 10:06:25.701] [ERROR] Connection error with 127.0.0.1:38813: Network error: Failed to receive data
+[2026-05-29 10:06:25.701] [INFO] Connection closed with 127.0.0.1:38813
+[2026-05-29 10:06:25.701] [INFO] Connection closed with 127.0.0.1:38814
+[2026-05-29 10:06:25.702] [INFO] Connection closed with 127.0.0.1:38807
+[2026-05-29 11:47:08.038] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 11:47:08.039] [INFO] Using server configuration from: server.conf
+[2026-05-29 11:47:08.039] [INFO] Starting NetCopy server...
+[2026-05-29 11:47:08.039] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 11:47:08.040] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 11:47:08.040] [INFO] Allowed paths:
+[2026-05-29 11:47:08.040] [INFO]   - D:\src\net_copy\
+[2026-05-29 11:47:08.040] [INFO]   - D:\Work\
+[2026-05-29 11:47:12.848] [INFO] Handling connection from 127.0.0.1:41652
+[2026-05-29 11:47:12.848] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:47:12.849] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:47:12.849] [ERROR] Connection error with 127.0.0.1:41652: Auth error: Authentication required, but user database could not be loaded
+[2026-05-29 11:47:12.849] [INFO] Connection closed with 127.0.0.1:41652
+[2026-05-29 11:51:57.319] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 11:51:57.319] [INFO] Using server configuration from: server.conf
+[2026-05-29 11:51:57.319] [INFO] Starting NetCopy server...
+[2026-05-29 11:51:57.320] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 11:51:57.320] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 11:51:57.320] [INFO] Allowed paths:
+[2026-05-29 11:51:57.321] [INFO]   - D:\src\net_copy\
+[2026-05-29 11:51:57.321] [INFO]   - D:\Work\
+[2026-05-29 11:52:00.203] [INFO] Handling connection from 127.0.0.1:35404
+[2026-05-29 11:52:00.203] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:00.204] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:00.204] [INFO] Handshake completed with 127.0.0.1:35404
+[2026-05-29 11:52:00.205] [ERROR] Connection error with 127.0.0.1:35404: Crypto error: Authentication failed
+[2026-05-29 11:52:00.205] [INFO] Connection closed with 127.0.0.1:35404
+[2026-05-29 11:52:54.360] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 11:52:54.361] [INFO] Using server configuration from: server.conf
+[2026-05-29 11:52:54.361] [INFO] Starting NetCopy server...
+[2026-05-29 11:52:54.361] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 11:52:54.362] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 11:52:54.362] [INFO] Allowed paths:
+[2026-05-29 11:52:54.362] [INFO]   - D:\src\net_copy\
+[2026-05-29 11:52:54.362] [INFO]   - D:\Work\
+[2026-05-29 11:52:57.196] [INFO] Handling connection from 127.0.0.1:19559
+[2026-05-29 11:52:57.196] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.196] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.197] [INFO] Handshake completed with 127.0.0.1:19559
+[2026-05-29 11:52:57.197] [INFO] File request from 127.0.0.1:19559: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 11:52:57.198] [INFO] File request from 127.0.0.1:19559: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 11:52:57.199] [INFO] File request from 127.0.0.1:19559: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 11:52:57.201] [INFO] Handling connection from 127.0.0.1:19560
+[2026-05-29 11:52:57.201] [INFO] Handling connection from 127.0.0.1:19561
+[2026-05-29 11:52:57.202] [INFO] Handling connection from 127.0.0.1:19562
+[2026-05-29 11:52:57.202] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.202] [INFO] Handling connection from 127.0.0.1:19564
+[2026-05-29 11:52:57.202] [INFO] Handling connection from 127.0.0.1:19563
+[2026-05-29 11:52:57.202] [INFO] Handling connection from 127.0.0.1:19565
+[2026-05-29 11:52:57.202] [INFO] Handling connection from 127.0.0.1:19566
+[2026-05-29 11:52:57.203] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.203] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.203] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.203] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.203] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.203] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.204] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.204] [INFO] Handling connection from 127.0.0.1:19567
+[2026-05-29 11:52:57.204] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.204] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.204] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.204] [INFO] Handshake completed with 127.0.0.1:19562
+[2026-05-29 11:52:57.204] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.205] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.205] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 11:52:57.205] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.205] [INFO] Handshake completed with 127.0.0.1:19561
+[2026-05-29 11:52:57.205] [INFO] Handshake completed with 127.0.0.1:19560
+[2026-05-29 11:52:57.205] [INFO] Handshake completed with 127.0.0.1:19563
+[2026-05-29 11:52:57.206] [INFO] Handshake completed with 127.0.0.1:19566
+[2026-05-29 11:52:57.206] [INFO] Handshake completed with 127.0.0.1:19567
+[2026-05-29 11:52:57.206] [INFO] File request from 127.0.0.1:19561: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 11:52:57.206] [INFO] File request from 127.0.0.1:19563: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 11:52:57.206] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 11:52:57.207] [INFO] File request from 127.0.0.1:19566: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 11:52:57.207] [INFO] File request from 127.0.0.1:19562: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 11:52:57.207] [INFO] File request from 127.0.0.1:19567: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 11:52:57.207] [INFO] Handshake completed with 127.0.0.1:19565
+[2026-05-29 11:52:57.207] [INFO] Handshake completed with 127.0.0.1:19564
+[2026-05-29 11:52:57.207] [INFO] File request from 127.0.0.1:19564: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 11:52:57.208] [INFO] File request from 127.0.0.1:19565: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 11:52:57.208] [INFO] File request from 127.0.0.1:19560: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 11:52:58.594] [INFO] File request from 127.0.0.1:19566: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 11:52:58.594] [INFO] Client 127.0.0.1:19561 disconnected gracefully
+[2026-05-29 11:52:58.595] [INFO] Client 127.0.0.1:19562 disconnected gracefully
+[2026-05-29 11:52:58.595] [INFO] Client 127.0.0.1:19560 disconnected gracefully
+[2026-05-29 11:52:58.595] [INFO] Client 127.0.0.1:19563 disconnected gracefully
+[2026-05-29 11:53:03.104] [ERROR] Connection error with 127.0.0.1:19559: Network error: Failed to receive data
+[2026-05-29 11:53:03.105] [ERROR] Connection error with 127.0.0.1:19564: Network error: Failed to receive data
+[2026-05-29 11:53:03.105] [ERROR] Connection error with 127.0.0.1:19565: Network error: Failed to receive data
+[2026-05-29 11:53:03.105] [INFO] Connection closed with 127.0.0.1:19565
+[2026-05-29 11:53:03.106] [ERROR] Connection error with 127.0.0.1:19567: Network error: Failed to receive data
+[2026-05-29 11:53:03.106] [INFO] Connection closed with 127.0.0.1:19559
+[2026-05-29 11:53:03.106] [INFO] Connection closed with 127.0.0.1:19564
+[2026-05-29 11:53:03.106] [ERROR] Connection error with 127.0.0.1:19566: Network error: Failed to receive data
+[2026-05-29 11:53:03.106] [INFO] Connection closed with 127.0.0.1:19566
+[2026-05-29 11:53:03.106] [INFO] Connection closed with 127.0.0.1:19567
+[2026-05-29 12:08:46.440] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 12:08:46.441] [INFO] Using server configuration from: server.conf
+[2026-05-29 12:08:46.441] [INFO] Starting NetCopy server...
+[2026-05-29 12:08:46.441] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 12:08:46.442] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 12:08:46.442] [INFO] Allowed paths:
+[2026-05-29 12:08:46.442] [INFO]   - D:\src\net_copy\
+[2026-05-29 12:08:46.442] [INFO]   - D:\Work\
+[2026-05-29 12:08:50.087] [INFO] Handling connection from 127.0.0.1:36810
+[2026-05-29 12:08:50.088] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.088] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.089] [INFO] Handshake completed with 127.0.0.1:36810
+[2026-05-29 12:08:50.089] [INFO] File request from 127.0.0.1:36810: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 12:08:50.090] [INFO] File request from 127.0.0.1:36810: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 12:08:50.091] [INFO] File request from 127.0.0.1:36810: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 12:08:50.092] [INFO] Handling connection from 127.0.0.1:36811
+[2026-05-29 12:08:50.093] [INFO] Handling connection from 127.0.0.1:36813
+[2026-05-29 12:08:50.093] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.093] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.093] [INFO] Handling connection from 127.0.0.1:36812
+[2026-05-29 12:08:50.093] [INFO] Handling connection from 127.0.0.1:36816
+[2026-05-29 12:08:50.094] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.094] [INFO] Handling connection from 127.0.0.1:36817
+[2026-05-29 12:08:50.094] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.094] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.094] [INFO] Handling connection from 127.0.0.1:36815
+[2026-05-29 12:08:50.094] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.094] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.095] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.095] [INFO] Handling connection from 127.0.0.1:36818
+[2026-05-29 12:08:50.095] [INFO] Handling connection from 127.0.0.1:36814
+[2026-05-29 12:08:50.095] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.095] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.096] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.096] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.096] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.096] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.096] [INFO] Handshake completed with 127.0.0.1:36813
+[2026-05-29 12:08:50.097] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:08:50.097] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:08:50.097] [INFO] Handshake completed with 127.0.0.1:36811
+[2026-05-29 12:08:50.097] [INFO] Handshake completed with 127.0.0.1:36817
+[2026-05-29 12:08:50.098] [INFO] Handshake completed with 127.0.0.1:36818
+[2026-05-29 12:08:50.098] [INFO] Handshake completed with 127.0.0.1:36814
+[2026-05-29 12:08:50.098] [INFO] Handshake completed with 127.0.0.1:36815
+[2026-05-29 12:08:50.098] [INFO] File request from 127.0.0.1:36815: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:08:50.098] [INFO] Handshake completed with 127.0.0.1:36812
+[2026-05-29 12:08:50.099] [INFO] File request from 127.0.0.1:36812: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 12:08:50.099] [INFO] File request from 127.0.0.1:36814: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:08:50.099] [INFO] File request from 127.0.0.1:36811: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 12:08:50.099] [INFO] File request from 127.0.0.1:36817: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 12:08:50.099] [INFO] File request from 127.0.0.1:36818: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:08:50.100] [INFO] Handshake completed with 127.0.0.1:36816
+[2026-05-29 12:08:50.100] [INFO] File request from 127.0.0.1:36816: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:08:50.100] [INFO] File request from 127.0.0.1:36813: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 12:08:51.059] [INFO] File request from 127.0.0.1:36813: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 12:08:51.059] [INFO] Client 127.0.0.1:36815 disconnected gracefully
+[2026-05-29 12:08:51.059] [INFO] Client 127.0.0.1:36811 disconnected gracefully
+[2026-05-29 12:08:51.059] [INFO] Client 127.0.0.1:36814 disconnected gracefully
+[2026-05-29 12:08:51.060] [INFO] Client 127.0.0.1:36817 disconnected gracefully
+[2026-05-29 12:08:55.851] [ERROR] Connection error with 127.0.0.1:36810: Network error: Failed to receive data
+[2026-05-29 12:08:55.852] [INFO] Connection closed with 127.0.0.1:36810
+[2026-05-29 12:08:55.852] [ERROR] Connection error with 127.0.0.1:36813: Network error: Failed to receive data
+[2026-05-29 12:08:55.852] [ERROR] Connection error with 127.0.0.1:36812: Network error: Failed to receive data
+[2026-05-29 12:08:55.853] [INFO] Connection closed with 127.0.0.1:36812
+[2026-05-29 12:08:55.853] [ERROR] Connection error with 127.0.0.1:36818: Network error: Failed to receive data
+[2026-05-29 12:08:55.853] [INFO] Connection closed with 127.0.0.1:36818
+[2026-05-29 12:08:55.853] [ERROR] Connection error with 127.0.0.1:36816: Network error: Failed to receive data
+[2026-05-29 12:08:55.854] [INFO] Connection closed with 127.0.0.1:36816
+[2026-05-29 12:08:55.854] [INFO] Connection closed with 127.0.0.1:36813
+[2026-05-29 12:16:23.196] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 12:16:23.196] [INFO] Using server configuration from: server.conf
+[2026-05-29 12:16:23.197] [INFO] Starting NetCopy server...
+[2026-05-29 12:16:23.197] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 12:16:23.198] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 12:16:23.198] [INFO] Allowed paths:
+[2026-05-29 12:16:23.198] [INFO]   - D:\src\net_copy\
+[2026-05-29 12:16:23.198] [INFO]   - D:\Work\
+[2026-05-29 12:16:26.432] [INFO] Handling connection from 127.0.0.1:18259
+[2026-05-29 12:16:26.432] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.433] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.433] [INFO] Handshake completed with 127.0.0.1:18259
+[2026-05-29 12:16:26.434] [INFO] File request from 127.0.0.1:18259: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 12:16:26.434] [INFO] File request from 127.0.0.1:18259: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 12:16:26.435] [INFO] File request from 127.0.0.1:18259: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 12:16:26.437] [INFO] Handling connection from 127.0.0.1:18260
+[2026-05-29 12:16:26.437] [INFO] Handling connection from 127.0.0.1:18261
+[2026-05-29 12:16:26.437] [INFO] Handling connection from 127.0.0.1:18263
+[2026-05-29 12:16:26.437] [INFO] Handling connection from 127.0.0.1:18262
+[2026-05-29 12:16:26.437] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.438] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.438] [INFO] Handling connection from 127.0.0.1:18265
+[2026-05-29 12:16:26.438] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.438] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.438] [INFO] Handling connection from 127.0.0.1:18267
+[2026-05-29 12:16:26.438] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.439] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.439] [INFO] Handling connection from 127.0.0.1:18264
+[2026-05-29 12:16:26.439] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.439] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.439] [INFO] Handshake completed with 127.0.0.1:18261
+[2026-05-29 12:16:26.439] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.439] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.439] [INFO] Handshake completed with 127.0.0.1:18260
+[2026-05-29 12:16:26.440] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.440] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.440] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.440] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.440] [INFO] File request from 127.0.0.1:18261: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 12:16:26.440] [INFO] Handshake completed with 127.0.0.1:18263
+[2026-05-29 12:16:26.441] [INFO] Handshake completed with 127.0.0.1:18265
+[2026-05-29 12:16:26.441] [INFO] File request from 127.0.0.1:18260: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 12:16:26.441] [INFO] Handling connection from 127.0.0.1:18266
+[2026-05-29 12:16:26.441] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:16:26.441] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:16:26.441] [INFO] Handshake completed with 127.0.0.1:18264
+[2026-05-29 12:16:26.442] [INFO] File request from 127.0.0.1:18264: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 12:16:26.442] [INFO] File request from 127.0.0.1:18263: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:16:26.442] [INFO] Handshake completed with 127.0.0.1:18266
+[2026-05-29 12:16:26.442] [INFO] Handshake completed with 127.0.0.1:18267
+[2026-05-29 12:16:26.442] [INFO] Handshake completed with 127.0.0.1:18262
+[2026-05-29 12:16:26.442] [INFO] File request from 127.0.0.1:18266: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 12:16:26.442] [INFO] File request from 127.0.0.1:18267: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:16:26.443] [INFO] File request from 127.0.0.1:18262: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:16:26.443] [INFO] File request from 127.0.0.1:18265: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:16:27.442] [INFO] File request from 127.0.0.1:18261: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 12:16:27.443] [INFO] Client 127.0.0.1:18260 disconnected gracefully
+[2026-05-29 12:16:27.443] [INFO] Client 127.0.0.1:18264 disconnected gracefully
+[2026-05-29 12:16:27.443] [INFO] Client 127.0.0.1:18262 disconnected gracefully
+[2026-05-29 12:16:27.444] [INFO] Client 127.0.0.1:18263 disconnected gracefully
+[2026-05-29 12:16:32.076] [ERROR] Connection error with 127.0.0.1:18259: Network error: Failed to receive data
+[2026-05-29 12:16:32.077] [ERROR] Connection error with 127.0.0.1:18261: Network error: Failed to receive data
+[2026-05-29 12:16:32.077] [ERROR] Connection error with 127.0.0.1:18265: Network error: Failed to receive data
+[2026-05-29 12:16:32.077] [ERROR] Connection error with 127.0.0.1:18266: Network error: Failed to receive data
+[2026-05-29 12:16:32.077] [INFO] Connection closed with 127.0.0.1:18259
+[2026-05-29 12:16:32.078] [ERROR] Connection error with 127.0.0.1:18267: Network error: Failed to receive data
+[2026-05-29 12:16:32.078] [INFO] Connection closed with 127.0.0.1:18261
+[2026-05-29 12:16:32.078] [INFO] Connection closed with 127.0.0.1:18265
+[2026-05-29 12:16:32.078] [INFO] Connection closed with 127.0.0.1:18266
+[2026-05-29 12:16:32.078] [INFO] Connection closed with 127.0.0.1:18267
+[2026-05-29 12:23:53.763] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 12:23:53.763] [INFO] Using server configuration from: server.conf
+[2026-05-29 12:23:53.763] [INFO] Starting NetCopy server...
+[2026-05-29 12:23:53.764] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 12:23:53.764] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 12:23:53.764] [INFO] Allowed paths:
+[2026-05-29 12:23:53.764] [INFO]   - D:\src\net_copy\
+[2026-05-29 12:23:53.764] [INFO]   - D:\Work\
+[2026-05-29 12:23:58.702] [INFO] Handling connection from 127.0.0.1:5087
+[2026-05-29 12:23:58.702] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.702] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.703] [INFO] Handshake completed with 127.0.0.1:5087
+[2026-05-29 12:23:58.703] [INFO] File request from 127.0.0.1:5087: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 12:23:58.704] [INFO] File request from 127.0.0.1:5087: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 12:23:58.705] [INFO] File request from 127.0.0.1:5087: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 12:23:58.706] [INFO] Handling connection from 127.0.0.1:5089
+[2026-05-29 12:23:58.706] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.706] [INFO] Handling connection from 127.0.0.1:5088
+[2026-05-29 12:23:58.707] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.707] [INFO] Handling connection from 127.0.0.1:5090
+[2026-05-29 12:23:58.707] [INFO] Handling connection from 127.0.0.1:5091
+[2026-05-29 12:23:58.707] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.707] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.707] [INFO] Handling connection from 127.0.0.1:5093
+[2026-05-29 12:23:58.708] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.708] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.708] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.708] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.708] [INFO] Handling connection from 127.0.0.1:5092
+[2026-05-29 12:23:58.708] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.708] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.708] [INFO] Handling connection from 127.0.0.1:5094
+[2026-05-29 12:23:58.708] [INFO] Handling connection from 127.0.0.1:5095
+[2026-05-29 12:23:58.709] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.709] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.709] [INFO] Handshake completed with 127.0.0.1:5090
+[2026-05-29 12:23:58.709] [INFO] Handshake completed with 127.0.0.1:5089
+[2026-05-29 12:23:58.709] [INFO] Handshake completed with 127.0.0.1:5092
+[2026-05-29 12:23:58.709] [INFO] Handshake completed with 127.0.0.1:5093
+[2026-05-29 12:23:58.709] [INFO] Handshake completed with 127.0.0.1:5088
+[2026-05-29 12:23:58.709] [INFO] File request from 127.0.0.1:5090: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 12:23:58.709] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.710] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.710] [INFO] File request from 127.0.0.1:5092: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:23:58.710] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:23:58.710] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:23:58.710] [INFO] File request from 127.0.0.1:5089: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 12:23:58.710] [INFO] Handshake completed with 127.0.0.1:5095
+[2026-05-29 12:23:58.710] [INFO] Handshake completed with 127.0.0.1:5094
+[2026-05-29 12:23:58.711] [INFO] File request from 127.0.0.1:5093: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:23:58.711] [INFO] File request from 127.0.0.1:5088: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 12:23:58.711] [INFO] File request from 127.0.0.1:5095: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:23:58.711] [INFO] File request from 127.0.0.1:5094: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:23:58.711] [INFO] Handshake completed with 127.0.0.1:5091
+[2026-05-29 12:23:58.711] [INFO] File request from 127.0.0.1:5091: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 12:23:58.988] [ERROR] Connection error with 127.0.0.1:5087: Network error: Failed to receive data
+[2026-05-29 12:23:58.989] [INFO] Connection closed with 127.0.0.1:5087
+[2026-05-29 12:23:58.989] [ERROR] Connection error with 127.0.0.1:5089: Network error: Failed to receive data
+[2026-05-29 12:23:58.989] [ERROR] Connection error with 127.0.0.1:5090: Network error: Failed to receive data
+[2026-05-29 12:23:58.990] [ERROR] Connection error with 127.0.0.1:5091: Network error: Failed to receive data
+[2026-05-29 12:23:58.991] [ERROR] Connection error with 127.0.0.1:5088: Network error: Failed to receive data
+[2026-05-29 12:23:58.991] [ERROR] Connection error with 127.0.0.1:5092: Network error: Failed to receive data
+[2026-05-29 12:23:58.992] [ERROR] Connection error with 127.0.0.1:5093: Network error: Failed to receive data
+[2026-05-29 12:23:58.992] [INFO] Connection closed with 127.0.0.1:5093
+[2026-05-29 12:23:58.992] [INFO] Connection closed with 127.0.0.1:5089
+[2026-05-29 12:23:58.992] [ERROR] Connection error with 127.0.0.1:5095: Network error: Failed to receive data
+[2026-05-29 12:23:58.992] [INFO] Connection closed with 127.0.0.1:5090
+[2026-05-29 12:23:58.993] [INFO] Connection closed with 127.0.0.1:5091
+[2026-05-29 12:23:58.993] [INFO] Connection closed with 127.0.0.1:5088
+[2026-05-29 12:23:58.993] [INFO] Connection closed with 127.0.0.1:5092
+[2026-05-29 12:23:58.993] [ERROR] Connection error with 127.0.0.1:5094: Network error: Failed to receive data
+[2026-05-29 12:23:58.994] [INFO] Connection closed with 127.0.0.1:5095
+[2026-05-29 12:23:58.994] [INFO] Connection closed with 127.0.0.1:5094
+[2026-05-29 12:30:17.428] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 12:30:17.428] [INFO] Using server configuration from: server.conf
+[2026-05-29 12:30:17.428] [INFO] Starting NetCopy server...
+[2026-05-29 12:30:17.429] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 12:30:17.429] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 12:30:17.430] [INFO] Allowed paths:
+[2026-05-29 12:30:17.430] [INFO]   - D:\src\net_copy\
+[2026-05-29 12:30:17.430] [INFO]   - D:\Work\
+[2026-05-29 12:30:21.159] [INFO] Handling connection from 127.0.0.1:50933
+[2026-05-29 12:30:21.160] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.160] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.161] [INFO] Handshake completed with 127.0.0.1:50933
+[2026-05-29 12:30:21.162] [INFO] File request from 127.0.0.1:50933: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 12:30:21.162] [INFO] File request from 127.0.0.1:50933: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 12:30:21.163] [INFO] File request from 127.0.0.1:50933: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 12:30:21.165] [INFO] Handling connection from 127.0.0.1:50934
+[2026-05-29 12:30:21.165] [INFO] Handling connection from 127.0.0.1:50935
+[2026-05-29 12:30:21.166] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.166] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.166] [INFO] Handling connection from 127.0.0.1:50937
+[2026-05-29 12:30:21.166] [INFO] Handling connection from 127.0.0.1:50938
+[2026-05-29 12:30:21.166] [INFO] Handling connection from 127.0.0.1:50939
+[2026-05-29 12:30:21.166] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.167] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.167] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.167] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.167] [INFO] Handshake completed with 127.0.0.1:50934
+[2026-05-29 12:30:21.168] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.168] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.168] [INFO] Handling connection from 127.0.0.1:50941
+[2026-05-29 12:30:21.168] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.168] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.169] [INFO] Handshake completed with 127.0.0.1:50935
+[2026-05-29 12:30:21.169] [INFO] Handling connection from 127.0.0.1:50940
+[2026-05-29 12:30:21.169] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.169] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.169] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.169] [INFO] File request from 127.0.0.1:50934: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 12:30:21.169] [INFO] Handshake completed with 127.0.0.1:50941
+[2026-05-29 12:30:21.170] [INFO] Handshake completed with 127.0.0.1:50939
+[2026-05-29 12:30:21.170] [INFO] Handling connection from 127.0.0.1:50936
+[2026-05-29 12:30:21.170] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:30:21.170] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.170] [INFO] Handshake completed with 127.0.0.1:50938
+[2026-05-29 12:30:21.170] [INFO] File request from 127.0.0.1:50935: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:30:21.170] [INFO] File request from 127.0.0.1:50941: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:30:21.171] [INFO] File request from 127.0.0.1:50939: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 12:30:21.171] [INFO] Handshake completed with 127.0.0.1:50936
+[2026-05-29 12:30:21.171] [INFO] File request from 127.0.0.1:50936: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:30:21.171] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:30:21.171] [INFO] File request from 127.0.0.1:50938: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 12:30:21.172] [INFO] Handshake completed with 127.0.0.1:50937
+[2026-05-29 12:30:21.172] [INFO] File request from 127.0.0.1:50937: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 12:30:21.172] [INFO] Handshake completed with 127.0.0.1:50940
+[2026-05-29 12:30:21.172] [INFO] File request from 127.0.0.1:50940: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:30:22.340] [INFO] File request from 127.0.0.1:50934: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 12:30:22.340] [INFO] Client 127.0.0.1:50941 disconnected gracefully
+[2026-05-29 12:30:22.340] [INFO] Client 127.0.0.1:50935 disconnected gracefully
+[2026-05-29 12:30:22.341] [INFO] Client 127.0.0.1:50938 disconnected gracefully
+[2026-05-29 12:30:22.341] [INFO] Client 127.0.0.1:50939 disconnected gracefully
+[2026-05-29 12:30:27.013] [ERROR] Connection error with 127.0.0.1:50933: Network error: Failed to receive data
+[2026-05-29 12:30:27.013] [INFO] Connection closed with 127.0.0.1:50933
+[2026-05-29 12:30:27.014] [ERROR] Connection error with 127.0.0.1:50934: Network error: Failed to receive data
+[2026-05-29 12:30:27.014] [ERROR] Connection error with 127.0.0.1:50936: Network error: Failed to receive data
+[2026-05-29 12:30:27.014] [ERROR] Connection error with 127.0.0.1:50937: Network error: Failed to receive data
+[2026-05-29 12:30:27.014] [ERROR] Connection error with 127.0.0.1:50940: Network error: Failed to receive data
+[2026-05-29 12:30:27.015] [INFO] Connection closed with 127.0.0.1:50940
+[2026-05-29 12:30:27.015] [INFO] Connection closed with 127.0.0.1:50936
+[2026-05-29 12:30:27.015] [INFO] Connection closed with 127.0.0.1:50937
+[2026-05-29 12:30:27.015] [INFO] Connection closed with 127.0.0.1:50934
+[2026-05-29 12:33:05.474] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 12:33:05.474] [INFO] Using server configuration from: server.conf
+[2026-05-29 12:33:05.475] [INFO] Starting NetCopy server...
+[2026-05-29 12:33:05.475] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 12:33:05.475] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 12:33:05.476] [INFO] Allowed paths:
+[2026-05-29 12:33:05.476] [INFO]   - D:\src\net_copy\
+[2026-05-29 12:33:05.476] [INFO]   - D:\Work\
+[2026-05-29 12:41:02.523] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 12:41:02.524] [INFO] Using server configuration from: server.conf
+[2026-05-29 12:41:02.524] [INFO] Starting NetCopy server...
+[2026-05-29 12:41:02.524] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 12:41:02.525] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 12:41:02.525] [INFO] Allowed paths:
+[2026-05-29 12:41:02.525] [INFO]   - D:\src\net_copy\
+[2026-05-29 12:41:02.525] [INFO]   - D:\Work\
+[2026-05-29 12:41:06.764] [INFO] Handling connection from 127.0.0.1:2291
+[2026-05-29 12:41:06.764] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.764] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.765] [INFO] Handshake completed with 127.0.0.1:2291
+[2026-05-29 12:41:06.766] [INFO] File request from 127.0.0.1:2291: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 12:41:06.767] [INFO] File request from 127.0.0.1:2291: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 12:41:06.768] [INFO] File request from 127.0.0.1:2291: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 12:41:06.769] [INFO] Handling connection from 127.0.0.1:2292
+[2026-05-29 12:41:06.770] [INFO] Handling connection from 127.0.0.1:2293
+[2026-05-29 12:41:06.770] [INFO] Handling connection from 127.0.0.1:2294
+[2026-05-29 12:41:06.770] [INFO] Handling connection from 127.0.0.1:2295
+[2026-05-29 12:41:06.770] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.770] [INFO] Handling connection from 127.0.0.1:2297
+[2026-05-29 12:41:06.770] [INFO] Handling connection from 127.0.0.1:2296
+[2026-05-29 12:41:06.771] [INFO] Handling connection from 127.0.0.1:2299
+[2026-05-29 12:41:06.771] [INFO] Handling connection from 127.0.0.1:2298
+[2026-05-29 12:41:06.771] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.771] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.771] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.771] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.772] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.772] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.772] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.772] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.772] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.772] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.773] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.773] [INFO] Handshake completed with 127.0.0.1:2292
+[2026-05-29 12:41:06.773] [INFO] Handshake completed with 127.0.0.1:2297
+[2026-05-29 12:41:06.773] [INFO] Handshake completed with 127.0.0.1:2299
+[2026-05-29 12:41:06.773] [INFO] Handshake completed with 127.0.0.1:2294
+[2026-05-29 12:41:06.773] [INFO] Handshake completed with 127.0.0.1:2295
+[2026-05-29 12:41:06.773] [INFO] File request from 127.0.0.1:2292: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 12:41:06.774] [INFO] Handshake completed with 127.0.0.1:2293
+[2026-05-29 12:41:06.774] [INFO] File request from 127.0.0.1:2294: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:41:06.774] [INFO] File request from 127.0.0.1:2297: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:41:06.774] [INFO] File request from 127.0.0.1:2299: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 12:41:06.774] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.775] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.775] [INFO] File request from 127.0.0.1:2295: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:41:06.775] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:06.775] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:06.775] [INFO] File request from 127.0.0.1:2293: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 12:41:06.775] [INFO] Handshake completed with 127.0.0.1:2296
+[2026-05-29 12:41:06.776] [INFO] File request from 127.0.0.1:2296: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:41:06.776] [INFO] Handshake completed with 127.0.0.1:2298
+[2026-05-29 12:41:06.776] [INFO] File request from 127.0.0.1:2298: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 12:41:07.700] [INFO] File request from 127.0.0.1:2292: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 12:41:07.700] [INFO] Client 127.0.0.1:2299 disconnected gracefully
+[2026-05-29 12:41:07.700] [INFO] Client 127.0.0.1:2294 disconnected gracefully
+[2026-05-29 12:41:07.700] [INFO] Client 127.0.0.1:2293 disconnected gracefully
+[2026-05-29 12:41:07.700] [INFO] Client 127.0.0.1:2297 disconnected gracefully
+[2026-05-29 12:41:28.305] [ERROR] Connection error with 127.0.0.1:2291: Network error: Connection closed by peer
+[2026-05-29 12:41:28.306] [INFO] Connection closed with 127.0.0.1:2291
+[2026-05-29 12:41:28.306] [ERROR] Connection error with 127.0.0.1:2296: Network error: Failed to receive data
+[2026-05-29 12:41:28.307] [INFO] Connection closed with 127.0.0.1:2296
+[2026-05-29 12:41:28.308] [ERROR] Connection error with 127.0.0.1:2292: Network error: Failed to send data
+[2026-05-29 12:41:28.308] [INFO] Connection closed with 127.0.0.1:2292
+[2026-05-29 12:41:28.310] [ERROR] Connection error with 127.0.0.1:2298: Network error: Failed to send data
+[2026-05-29 12:41:28.310] [INFO] Connection closed with 127.0.0.1:2298
+[2026-05-29 12:41:28.319] [ERROR] Connection error with 127.0.0.1:2295: Network error: Failed to send data
+[2026-05-29 12:41:28.320] [INFO] Connection closed with 127.0.0.1:2295
+[2026-05-29 12:41:29.612] [INFO] Handling connection from 127.0.0.1:2300
+[2026-05-29 12:41:29.613] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.613] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.613] [INFO] Handshake completed with 127.0.0.1:2300
+[2026-05-29 12:41:29.614] [INFO] File request from 127.0.0.1:2300: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 12:41:29.615] [INFO] File request from 127.0.0.1:2300: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 12:41:29.616] [INFO] File request from 127.0.0.1:2300: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 12:41:29.617] [INFO] Handling connection from 127.0.0.1:2301
+[2026-05-29 12:41:29.617] [INFO] Handling connection from 127.0.0.1:2302
+[2026-05-29 12:41:29.618] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.618] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.618] [INFO] Handling connection from 127.0.0.1:2304
+[2026-05-29 12:41:29.618] [INFO] Handling connection from 127.0.0.1:2306
+[2026-05-29 12:41:29.618] [INFO] Handling connection from 127.0.0.1:2305
+[2026-05-29 12:41:29.619] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.619] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.619] [INFO] Handling connection from 127.0.0.1:2308
+[2026-05-29 12:41:29.619] [INFO] Handling connection from 127.0.0.1:2303
+[2026-05-29 12:41:29.619] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.619] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.619] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.620] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.620] [INFO] Handshake completed with 127.0.0.1:2305
+[2026-05-29 12:41:29.620] [INFO] Handshake completed with 127.0.0.1:2301
+[2026-05-29 12:41:29.620] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.620] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.620] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.621] [INFO] Handling connection from 127.0.0.1:2307
+[2026-05-29 12:41:29.621] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.621] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.621] [INFO] File request from 127.0.0.1:2301: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 12:41:29.621] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.621] [INFO] Handshake completed with 127.0.0.1:2303
+[2026-05-29 12:41:29.622] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:41:29.622] [INFO] Handshake completed with 127.0.0.1:2302
+[2026-05-29 12:41:29.622] [INFO] File request from 127.0.0.1:2305: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 12:41:29.622] [INFO] Handshake completed with 127.0.0.1:2308
+[2026-05-29 12:41:29.622] [INFO] Handshake completed with 127.0.0.1:2304
+[2026-05-29 12:41:29.622] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:41:29.622] [INFO] File request from 127.0.0.1:2302: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 12:41:29.623] [INFO] Handshake completed with 127.0.0.1:2306
+[2026-05-29 12:41:29.623] [INFO] File request from 127.0.0.1:2304: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:41:29.623] [INFO] Handshake completed with 127.0.0.1:2307
+[2026-05-29 12:41:29.623] [INFO] File request from 127.0.0.1:2306: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:41:29.623] [INFO] File request from 127.0.0.1:2308: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:41:29.623] [INFO] File request from 127.0.0.1:2307: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 12:41:29.624] [INFO] File request from 127.0.0.1:2303: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:41:33.939] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG with block size 65536
+[2026-05-29 12:41:33.941] [INFO] File request from 127.0.0.1:2305: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 12:41:39.043] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\.gitignore with block size 65536
+[2026-05-29 12:41:39.043] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata with block size 65536
+[2026-05-29 12:41:39.044] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata with block size 65536
+[2026-05-29 12:41:39.044] [INFO] Computing block hashes for d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf with block size 65536
+[2026-05-29 12:41:39.044] [INFO] Computing block hashes for d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf with block size 65536
+[2026-05-29 12:41:39.044] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata with block size 65536
+[2026-05-29 12:41:39.045] [INFO] Computing block hashes for d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf with block size 65536
+[2026-05-29 12:41:39.045] [INFO] Computing block hashes for d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf with block size 65536
+[2026-05-29 12:41:39.045] [INFO] Client 127.0.0.1:2301 disconnected gracefully
+[2026-05-29 12:41:39.046] [INFO] Client 127.0.0.1:2303 disconnected gracefully
+[2026-05-29 12:41:39.046] [INFO] Client 127.0.0.1:2306 disconnected gracefully
+[2026-05-29 12:41:39.046] [INFO] Client 127.0.0.1:2302 disconnected gracefully
+[2026-05-29 12:41:51.489] [ERROR] Connection error with 127.0.0.1:2300: Network error: Connection closed by peer
+[2026-05-29 12:41:51.490] [ERROR] Connection error with 127.0.0.1:2304: Network error: Connection closed by peer
+[2026-05-29 12:41:51.490] [ERROR] Connection error with 127.0.0.1:2307: Network error: Connection closed by peer
+[2026-05-29 12:41:51.490] [ERROR] Connection error with 127.0.0.1:2308: Network error: Connection closed by peer
+[2026-05-29 12:41:51.490] [ERROR] Connection error with 127.0.0.1:2305: Network error: Connection closed by peer
+[2026-05-29 12:41:51.491] [INFO] Connection closed with 127.0.0.1:2300
+[2026-05-29 12:41:51.491] [INFO] Connection closed with 127.0.0.1:2304
+[2026-05-29 12:41:51.491] [INFO] Connection closed with 127.0.0.1:2307
+[2026-05-29 12:41:51.491] [INFO] Connection closed with 127.0.0.1:2308
+[2026-05-29 12:41:51.492] [INFO] Connection closed with 127.0.0.1:2305
+[2026-05-29 12:46:55.628] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 12:46:55.628] [INFO] Using server configuration from: server.conf
+[2026-05-29 12:46:55.628] [INFO] Starting NetCopy server...
+[2026-05-29 12:46:55.629] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 12:46:55.629] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 12:46:55.630] [INFO] Allowed paths:
+[2026-05-29 12:46:55.630] [INFO]   - D:\src\net_copy\
+[2026-05-29 12:46:55.630] [INFO]   - D:\Work\
+[2026-05-29 12:47:01.158] [INFO] Handling connection from 127.0.0.1:64772
+[2026-05-29 12:47:01.158] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.159] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.159] [INFO] Handshake completed with 127.0.0.1:64772
+[2026-05-29 12:47:01.160] [INFO] File request from 127.0.0.1:64772: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 12:47:01.161] [INFO] File request from 127.0.0.1:64772: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 12:47:01.162] [INFO] File request from 127.0.0.1:64772: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 12:47:01.163] [INFO] Handling connection from 127.0.0.1:64773
+[2026-05-29 12:47:01.163] [INFO] Handling connection from 127.0.0.1:64775
+[2026-05-29 12:47:01.163] [INFO] Handling connection from 127.0.0.1:64774
+[2026-05-29 12:47:01.164] [INFO] Handling connection from 127.0.0.1:64776
+[2026-05-29 12:47:01.164] [INFO] Handling connection from 127.0.0.1:64777
+[2026-05-29 12:47:01.164] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.164] [INFO] Handling connection from 127.0.0.1:64779
+[2026-05-29 12:47:01.164] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.165] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.165] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.165] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.165] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.166] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.166] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.166] [INFO] Handling connection from 127.0.0.1:64778
+[2026-05-29 12:47:01.166] [INFO] Handling connection from 127.0.0.1:64780
+[2026-05-29 12:47:01.166] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.166] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.166] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.167] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.167] [INFO] Handshake completed with 127.0.0.1:64773
+[2026-05-29 12:47:01.167] [INFO] Handshake completed with 127.0.0.1:64779
+[2026-05-29 12:47:01.167] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.167] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.167] [INFO] Handshake completed with 127.0.0.1:64780
+[2026-05-29 12:47:01.168] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 12:47:01.168] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 12:47:01.168] [INFO] File request from 127.0.0.1:64773: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:47:01.168] [INFO] File request from 127.0.0.1:64779: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 12:47:01.168] [INFO] Handshake completed with 127.0.0.1:64775
+[2026-05-29 12:47:01.168] [INFO] Handshake completed with 127.0.0.1:64778
+[2026-05-29 12:47:01.169] [INFO] Handshake completed with 127.0.0.1:64774
+[2026-05-29 12:47:01.169] [INFO] Handshake completed with 127.0.0.1:64777
+[2026-05-29 12:47:01.169] [INFO] File request from 127.0.0.1:64777: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:47:01.169] [INFO] File request from 127.0.0.1:64775: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 12:47:01.169] [INFO] File request from 127.0.0.1:64778: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 12:47:01.169] [INFO] File request from 127.0.0.1:64774: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:47:01.169] [INFO] Handshake completed with 127.0.0.1:64776
+[2026-05-29 12:47:01.170] [INFO] File request from 127.0.0.1:64776: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 12:47:01.170] [INFO] File request from 127.0.0.1:64780: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 12:47:03.267] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\.gitignore with block size 65536
+[2026-05-29 12:47:03.268] [INFO] File request from 127.0.0.1:64779: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 12:47:04.997] [INFO] Computing block hashes for d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf with block size 65536
+[2026-05-29 12:47:04.997] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG with block size 65536
+[2026-05-29 12:47:04.997] [INFO] Computing block hashes for d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf with block size 65536
+[2026-05-29 12:47:04.998] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata with block size 65536
+[2026-05-29 12:47:04.998] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata with block size 65536
+[2026-05-29 12:47:04.998] [INFO] Computing block hashes for d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata with block size 65536
+[2026-05-29 12:47:04.999] [INFO] Computing block hashes for d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf with block size 65536
+[2026-05-29 12:47:04.999] [INFO] Computing block hashes for d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf with block size 65536
+[2026-05-29 12:47:05.000] [INFO] Client 127.0.0.1:64775 disconnected gracefully
+[2026-05-29 12:47:05.000] [INFO] Client 127.0.0.1:64773 disconnected gracefully
+[2026-05-29 12:47:05.000] [INFO] Client 127.0.0.1:64780 disconnected gracefully
+[2026-05-29 12:47:05.001] [INFO] Client 127.0.0.1:64776 disconnected gracefully
+[2026-05-29 12:47:55.033] [INFO] Computing checksum for E2E integrity check of d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:48:05.360] [INFO] Computing checksum for E2E integrity check of d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:48:05.859] [ERROR] Connection error with 127.0.0.1:64772: Network error: Connection closed by peer
+[2026-05-29 12:48:05.859] [INFO] Connection closed with 127.0.0.1:64772
+[2026-05-29 12:48:05.860] [ERROR] Connection error with 127.0.0.1:64778: Network error: Failed to receive data
+[2026-05-29 12:48:05.860] [ERROR] Connection error with 127.0.0.1:64779: Network error: Failed to receive data
+[2026-05-29 12:48:05.860] [INFO] Connection closed with 127.0.0.1:64778
+[2026-05-29 12:48:05.861] [INFO] Connection closed with 127.0.0.1:64779
+[2026-05-29 12:48:06.199] [INFO] E2E integrity check successful for d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 12:48:06.200] [ERROR] Connection error with 127.0.0.1:64774: Network error: Failed to send data
+[2026-05-29 12:48:06.200] [INFO] Connection closed with 127.0.0.1:64774
+[2026-05-29 12:48:17.078] [INFO] E2E integrity check successful for d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 12:48:17.078] [ERROR] Connection error with 127.0.0.1:64777: Network error: Failed to send data
+[2026-05-29 12:48:17.078] [INFO] Connection closed with 127.0.0.1:64777
+[2026-05-29 13:00:51.294] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 13:00:51.294] [INFO] Using server configuration from: server.conf
+[2026-05-29 13:00:51.295] [INFO] Starting NetCopy server...
+[2026-05-29 13:00:51.295] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 13:00:51.296] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 13:00:51.296] [INFO] Allowed paths:
+[2026-05-29 13:00:51.296] [INFO]   - D:\src\net_copy\
+[2026-05-29 13:00:51.296] [INFO]   - D:\Work\
+[2026-05-29 13:01:07.469] [INFO] Handling connection from 127.0.0.1:37527
+[2026-05-29 13:01:07.469] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.469] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.470] [INFO] Handshake completed with 127.0.0.1:37527
+[2026-05-29 13:01:07.471] [INFO] File request from 127.0.0.1:37527: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 13:01:07.472] [INFO] File request from 127.0.0.1:37527: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 13:01:07.474] [INFO] File request from 127.0.0.1:37527: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 13:01:07.476] [INFO] Handling connection from 127.0.0.1:37528
+[2026-05-29 13:01:07.476] [INFO] Handling connection from 127.0.0.1:37529
+[2026-05-29 13:01:07.477] [INFO] Handling connection from 127.0.0.1:37530
+[2026-05-29 13:01:07.477] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.477] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.477] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.477] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.477] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.478] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.478] [INFO] Handling connection from 127.0.0.1:37533
+[2026-05-29 13:01:07.478] [INFO] Handling connection from 127.0.0.1:37531
+[2026-05-29 13:01:07.478] [INFO] Handling connection from 127.0.0.1:37534
+[2026-05-29 13:01:07.478] [INFO] Handshake completed with 127.0.0.1:37529
+[2026-05-29 13:01:07.478] [INFO] Handling connection from 127.0.0.1:37532
+[2026-05-29 13:01:07.479] [INFO] Handshake completed with 127.0.0.1:37530
+[2026-05-29 13:01:07.479] [INFO] File request from 127.0.0.1:37530: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 13:01:07.479] [INFO] Handling connection from 127.0.0.1:37535
+[2026-05-29 13:01:07.479] [INFO] File request from 127.0.0.1:37529: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 13:01:07.479] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.479] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.480] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.480] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.480] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.480] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.480] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.481] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.481] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:07.481] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:07.481] [INFO] Handshake completed with 127.0.0.1:37528
+[2026-05-29 13:01:07.482] [INFO] Handshake completed with 127.0.0.1:37534
+[2026-05-29 13:01:07.482] [INFO] Handshake completed with 127.0.0.1:37535
+[2026-05-29 13:01:07.482] [INFO] Handshake completed with 127.0.0.1:37533
+[2026-05-29 13:01:07.482] [INFO] File request from 127.0.0.1:37534: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 13:01:07.482] [INFO] File request from 127.0.0.1:37528: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 13:01:07.483] [INFO] Handshake completed with 127.0.0.1:37531
+[2026-05-29 13:01:07.483] [INFO] Handshake completed with 127.0.0.1:37532
+[2026-05-29 13:01:07.483] [INFO] File request from 127.0.0.1:37533: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 13:01:07.483] [INFO] File request from 127.0.0.1:37531: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 13:01:07.484] [INFO] File request from 127.0.0.1:37535: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 13:01:07.484] [INFO] Client 127.0.0.1:37529 disconnected gracefully
+[2026-05-29 13:01:07.485] [INFO] File request from 127.0.0.1:37530: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 13:01:07.485] [INFO] File request from 127.0.0.1:37532: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 13:01:07.486] [INFO] Client 127.0.0.1:37534 disconnected gracefully
+[2026-05-29 13:01:07.487] [INFO] Client 127.0.0.1:37528 disconnected gracefully
+[2026-05-29 13:01:07.488] [INFO] Client 127.0.0.1:37532 disconnected gracefully
+[2026-05-29 13:01:23.820] [INFO] Server configuration loaded from: server.conf
+[2026-05-29 13:01:23.821] [INFO] Using server configuration from: server.conf
+[2026-05-29 13:01:23.821] [INFO] Starting NetCopy server...
+[2026-05-29 13:01:23.821] [INFO] EventLoop started with 10 worker threads.
+[2026-05-29 13:01:23.822] [INFO] Securely listening on TCP port 1245 (async_accept)
+[2026-05-29 13:01:23.822] [INFO] Allowed paths:
+[2026-05-29 13:01:23.822] [INFO]   - D:\src\net_copy\
+[2026-05-29 13:01:23.822] [INFO]   - D:\Work\
+[2026-05-29 13:01:27.488] [INFO] Handling connection from 127.0.0.1:37536
+[2026-05-29 13:01:27.488] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.488] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.489] [INFO] Handshake completed with 127.0.0.1:37536
+[2026-05-29 13:01:27.490] [INFO] File request from 127.0.0.1:37536: .netcopy_empty_dir -> d:\src\net_copy\.cache\.netcopy_empty_dir
+[2026-05-29 13:01:27.491] [INFO] File request from 127.0.0.1:37536: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\.netcopy_empty_dir
+[2026-05-29 13:01:27.491] [INFO] File request from 127.0.0.1:37536: .netcopy_empty_dir -> d:\src\net_copy\.cache\huggingface\download\.netcopy_empty_dir
+[2026-05-29 13:01:27.493] [INFO] Handling connection from 127.0.0.1:37537
+[2026-05-29 13:01:27.493] [INFO] Handling connection from 127.0.0.1:37538
+[2026-05-29 13:01:27.494] [INFO] Handling connection from 127.0.0.1:37539
+[2026-05-29 13:01:27.494] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.494] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.494] [INFO] Handling connection from 127.0.0.1:37540
+[2026-05-29 13:01:27.495] [INFO] Handling connection from 127.0.0.1:37541
+[2026-05-29 13:01:27.495] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.495] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.495] [INFO] Handling connection from 127.0.0.1:37542
+[2026-05-29 13:01:27.495] [INFO] Handling connection from 127.0.0.1:37543
+[2026-05-29 13:01:27.495] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.496] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.496] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.496] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.496] [INFO] Handshake completed with 127.0.0.1:37539
+[2026-05-29 13:01:27.496] [INFO] Handshake completed with 127.0.0.1:37537
+[2026-05-29 13:01:27.496] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.496] [INFO] Handling connection from 127.0.0.1:37544
+[2026-05-29 13:01:27.497] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.497] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.497] [INFO] Handshake completed with 127.0.0.1:37541
+[2026-05-29 13:01:27.497] [INFO] File request from 127.0.0.1:37541: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 13:01:27.497] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.497] [INFO] Handshake completed with 127.0.0.1:37543
+[2026-05-29 13:01:27.498] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.498] [INFO] Handshake from client version: NetCopy v0.81.2605.5
+[2026-05-29 13:01:27.498] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.498] [INFO] Handshake completed with 127.0.0.1:37544
+[2026-05-29 13:01:27.498] [INFO] File request from 127.0.0.1:37544: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 13:01:27.498] [INFO] File request from 127.0.0.1:37539: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 13:01:27.498] [INFO] File request from 127.0.0.1:37537: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 13:01:27.499] [INFO] File request from 127.0.0.1:37543: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 13:01:27.499] [INFO] Handshake completed with 127.0.0.1:37540
+[2026-05-29 13:01:27.499] [INFO] Handshake completed with 127.0.0.1:37542
+[2026-05-29 13:01:27.499] [INFO] File request from 127.0.0.1:37542: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 13:01:27.499] [INFO] File request from 127.0.0.1:37540: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 13:01:27.499] [INFO] Using security level: HIGH (ChaCha20-Poly1305)
+[2026-05-29 13:01:27.500] [INFO] Handshake completed with 127.0.0.1:37538
+[2026-05-29 13:01:27.500] [INFO] File request from 127.0.0.1:37538: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 13:01:29.859] [INFO] File request from 127.0.0.1:37541: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf.metadata
+[2026-05-29 13:01:29.859] [INFO] File request from 127.0.0.1:37537: ..\..\models\.cache\huggingface\.gitignore -> d:\src\net_copy\.cache\huggingface\.gitignore
+[2026-05-29 13:01:29.860] [INFO] File request from 127.0.0.1:37543: ..\..\models\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Llama-3.3-70B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 13:01:29.860] [INFO] File request from 127.0.0.1:37538: ..\..\models\Qwen3-14B-Q4_K_M.gguf -> d:\src\net_copy\Qwen3-14B-Q4_K_M.gguf
+[2026-05-29 13:01:29.860] [INFO] File request from 127.0.0.1:37539: ..\..\models\.cache\huggingface\CACHEDIR.TAG -> d:\src\net_copy\.cache\huggingface\CACHEDIR.TAG
+[2026-05-29 13:01:29.861] [INFO] File request from 127.0.0.1:37544: ..\..\models\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata -> d:\src\net_copy\.cache\huggingface\download\Qwen3-Coder-30B-A3B-Instruct-Q4_K_M.gguf.metadata
+[2026-05-29 13:01:29.861] [INFO] File request from 127.0.0.1:37542: ..\..\models\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf -> d:\src\net_copy\Hermes-2-Pro-Mistral-7B-Q4_K_M.gguf
+[2026-05-29 13:01:29.861] [INFO] File request from 127.0.0.1:37540: ..\..\models\gemma-4-E4B-it-Q4_K_M.gguf -> d:\src\net_copy\gemma-4-E4B-it-Q4_K_M.gguf
+[2026-05-29 13:01:29.864] [INFO] File request from 127.0.0.1:37539: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 13:01:29.864] [INFO] Client 127.0.0.1:37544 disconnected gracefully
+[2026-05-29 13:01:29.864] [INFO] Client 127.0.0.1:37537 disconnected gracefully
+[2026-05-29 13:01:29.865] [INFO] Client 127.0.0.1:37541 disconnected gracefully
+[2026-05-29 13:01:29.865] [INFO] Client 127.0.0.1:37543 disconnected gracefully
+[2026-05-29 13:01:30.088] [INFO] File request from 127.0.0.1:37539: ..\..\models\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf -> d:\src\net_copy\Qwen3-Coder-30B-A3B-Instruct-Q2_K.gguf
+[2026-05-29 13:01:42.131] [ERROR] Connection error with 127.0.0.1:37536: Network error: Connection closed by peer
+[2026-05-29 13:01:42.132] [ERROR] Connection error with 127.0.0.1:37540: Network error: Failed to receive data
+[2026-05-29 13:01:42.132] [ERROR] Connection error with 127.0.0.1:37539: Network error: Failed to receive data
+[2026-05-29 13:01:42.132] [ERROR] Connection error with 127.0.0.1:37542: Network error: Failed to receive data
+[2026-05-29 13:01:42.132] [INFO] Connection closed with 127.0.0.1:37542
+[2026-05-29 13:01:42.132] [INFO] Connection closed with 127.0.0.1:37536
+[2026-05-29 13:01:42.133] [INFO] Connection closed with 127.0.0.1:37540
+[2026-05-29 13:01:42.133] [INFO] Connection closed with 127.0.0.1:37539
+[2026-05-29 13:01:42.133] [ERROR] Connection error with 127.0.0.1:37538: Network error: Failed to receive data
+[2026-05-29 13:01:42.133] [INFO] Connection closed with 127.0.0.1:37538

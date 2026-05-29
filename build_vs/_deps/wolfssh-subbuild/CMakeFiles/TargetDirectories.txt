@@ -1,0 +1,3 @@
+D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/wolfssh-populate.dir
+D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/ALL_BUILD.dir
+D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/ZERO_CHECK.dir

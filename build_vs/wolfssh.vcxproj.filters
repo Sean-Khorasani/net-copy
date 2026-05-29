@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\certman.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\internal.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\io.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\keygen.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\log.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\port.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\ssh.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\wolfscp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\wolfsftp.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="D:\src\net_copy\build_vs\_deps\wolfssh-src\src\wolfterm.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="D:\src\net_copy\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{1A2E9D66-E958-34D7-BCB5-A3F80A6C9A7D}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

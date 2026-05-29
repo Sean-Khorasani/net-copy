@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/wolfssh-populate"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/af0726be18a3a33a8dac5509e970ec40/wolfssh-populate.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/3c2289f720001483346d66e8b5fafb9f/wolfssh-populate-complete.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/036cf4da4e8a7efc0cc49707d73c8a32/wolfssh-populate-build.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/036cf4da4e8a7efc0cc49707d73c8a32/wolfssh-populate-configure.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/036cf4da4e8a7efc0cc49707d73c8a32/wolfssh-populate-download.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/036cf4da4e8a7efc0cc49707d73c8a32/wolfssh-populate-install.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/036cf4da4e8a7efc0cc49707d73c8a32/wolfssh-populate-mkdir.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/036cf4da4e8a7efc0cc49707d73c8a32/wolfssh-populate-patch_disconnected.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/036cf4da4e8a7efc0cc49707d73c8a32/wolfssh-populate-test.rule"
+		},
+		{
+			"file" : "D:/src/net_copy/build_vs/_deps/wolfssh-subbuild/CMakeFiles/036cf4da4e8a7efc0cc49707d73c8a32/wolfssh-populate-update_disconnected.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"wolfssh-populate"
+		],
+		"name" : "wolfssh-populate"
+	}
+}

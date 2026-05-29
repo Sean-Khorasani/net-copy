@@ -1,0 +1,10 @@
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\certman.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\certman.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\internal.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\internal.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\io.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\io.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\keygen.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\keygen.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\log.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\log.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\port.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\port.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\ssh.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\ssh.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\wolfscp.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\wolfscp.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\wolfsftp.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\wolfsftp.obj
+D:\src\net_copy\build_vs\_deps\wolfssh-src\src\wolfterm.c;D:\src\net_copy\build_vs\wolfssh.dir\Release\wolfterm.obj

@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="18.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\f4ca1d1e0120284f16234a0e1eb6aafe\asio-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\f4ca1d1e0120284f16234a0e1eb6aafe\asio-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\f4ca1d1e0120284f16234a0e1eb6aafe\asio-populate-update_disconnected.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\f4ca1d1e0120284f16234a0e1eb6aafe\asio-populate-patch_disconnected.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\f4ca1d1e0120284f16234a0e1eb6aafe\asio-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\f4ca1d1e0120284f16234a0e1eb6aafe\asio-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\f4ca1d1e0120284f16234a0e1eb6aafe\asio-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\f4ca1d1e0120284f16234a0e1eb6aafe\asio-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\cd958d8f11b95df76a08a436d2d0692d\asio-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\be32ca6404cfabc2da7aa5068c36fca4\asio-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\src\net_copy\build_vs\_deps\asio-subbuild\CMakeFiles\asio-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{E3BBCBDF-DB46-381E-9D10-99CB38EBC3E6}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>
