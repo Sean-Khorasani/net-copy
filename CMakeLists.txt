@@ -1,10 +1,38 @@
 cmake_minimum_required(VERSION 3.10)
 
+# Set modern CMake policies
+if(POLICY CMP0091)
+    cmake_policy(SET CMP0091 NEW)  # MSVC runtime library flags
+endif()
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW)  # FetchContent timestamp
+endif()
+
 project(NetCopy CXX)
+
+# Enable MASM assembler on MSVC (must be before any targets)
+if(MSVC)
+    enable_language(ASM_MASM)
+endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+include(FetchContent)
+
+# Configure FetchContent to reuse downloads
+set(FETCHCONTENT_QUIET OFF)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ON)  # Don't update on every configure
+
+FetchContent_Declare(
+    asio
+    GIT_REPOSITORY https://github.com/chriskohlhoff/asio.git
+    GIT_TAG asio-1-28-0
+    GIT_SHALLOW ON
+)
+FetchContent_MakeAvailable(asio)
+
 
 # CUDA configuration (optional)
 option(ENABLE_CUDA "Enable CUDA support for GPU acceleration" OFF)
@@ -91,6 +119,9 @@ elseif(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /arch:AVX2")
     add_definitions(-D_WINSOCK_DEPRECATED_NO_WARNINGS)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS)
+    # Define Windows 10 target version to suppress ASIO warning
+    add_definitions(-D_WIN32_WINNT=0x0A00)
+    add_definitions(-DWINVER=0x0A00)
 endif()
 
 # Enable assembly support conditionally
@@ -113,6 +144,8 @@ set(COMMON_SOURCES
     src/crypto/mlkem.cpp
     src/crypto/key_manager.cpp
     src/network/socket.cpp
+    src/network/event_loop.cpp
+    src/network/async_socket.cpp
     src/protocol/message.cpp
     src/file/file_manager.cpp
     src/config/config_parser.cpp
@@ -126,6 +159,7 @@ set(COMMON_SOURCES
     src/auth/user_db.cpp
     src/auth/auth_engine.cpp
     src/common/fast_mem.cpp
+    src/network/ssh_server.cpp
 )
 
 # Add conditional assembly files
@@ -144,6 +178,11 @@ endif()
 
 # Create a static library for common components
 add_library(net_copy_common STATIC ${COMMON_SOURCES})
+
+# Add ASIO include directory and define standalone flag
+target_include_directories(net_copy_common PUBLIC ${asio_SOURCE_DIR}/asio/include)
+target_compile_definitions(net_copy_common PUBLIC ASIO_STANDALONE)
+
 
 # Try to find LZ4, otherwise continue without it (compression.cpp handles this)
 # Prefer vcpkg/CONFIG package if available
@@ -165,16 +204,100 @@ else()
     endif()
 endif()
 
-# Find liboqs for ML-KEM (post-quantum cryptography)
-find_package(liboqs REQUIRED)
-#target_link_libraries(net_copy_common PUBLIC liboqs::oqs)
-target_link_libraries(net_copy_common PUBLIC OQS::oqs)
-message(STATUS "liboqs found - ML-KEM authentication will be enabled")
+# ============================================================
+# wolfSSL - already installed via vcpkg (wolfssl:x64-windows@5.8.2)
+# Uses the vcpkg CMake target; OpenSSL compat layer activated
+# via compile definition so socket.h/socket.cpp need no changes.
+# ============================================================
+find_package(wolfssl CONFIG REQUIRED)
+message(STATUS "wolfSSL found via vcpkg - TLS backend (replaces OpenSSL)")
+
+# Activate the OpenSSL compatibility layer (maps SSL_CTX/SSL_*/ERR_* to wolfSSL)
+# This is a preprocessor switch — the compat headers are already installed by vcpkg
+target_compile_definitions(net_copy_common PUBLIC OPENSSL_EXTRA OPENSSL_ALL ASIO_USE_WOLFSSL WOLFSSL_ASIO OPENSSL_NO_SSL2 OPENSSL_NO_SSL3)
+
+# ============================================================
+# wolfSSH - SSH/SCP/SFTP server built on wolfSSL.
+# Not in vcpkg, so fetched from source. Depends on wolfSSL above.
+# ============================================================
+set(WOLFSSH_BUILD_TESTS OFF CACHE BOOL "Skip wolfSSH tests"    FORCE)
+set(WOLFSSH_EXAMPLES    OFF CACHE BOOL "Skip wolfSSH examples" FORCE)
+
+FetchContent_Declare(
+    wolfssh
+    GIT_REPOSITORY https://github.com/wolfSSL/wolfssh.git
+    GIT_TAG        v1.4.22-stable
+    GIT_SHALLOW    ON
+)
+FetchContent_GetProperties(wolfssh)
+if(NOT wolfssh_POPULATED)
+    FetchContent_Populate(wolfssh)
+endif()
+
+# Define wolfSSH static library target manually since wolfSSH does not have a root CMakeLists.txt
+set(WOLFSSH_SOURCES
+    ${wolfssh_SOURCE_DIR}/src/certman.c
+    ${wolfssh_SOURCE_DIR}/src/internal.c
+    ${wolfssh_SOURCE_DIR}/src/io.c
+    ${wolfssh_SOURCE_DIR}/src/keygen.c
+    ${wolfssh_SOURCE_DIR}/src/log.c
+    ${wolfssh_SOURCE_DIR}/src/port.c
+    ${wolfssh_SOURCE_DIR}/src/ssh.c
+    ${wolfssh_SOURCE_DIR}/src/wolfscp.c
+    ${wolfssh_SOURCE_DIR}/src/wolfsftp.c
+    ${wolfssh_SOURCE_DIR}/src/wolfterm.c
+)
+
+add_library(wolfssh STATIC ${WOLFSSH_SOURCES})
+target_link_libraries(wolfssh PUBLIC wolfssl::wolfssl)
+if(WIN32)
+    target_link_libraries(wolfssh PUBLIC ws2_32)
+endif()
+
+target_include_directories(wolfssh PUBLIC
+    ${wolfssh_SOURCE_DIR}
+)
+
+target_compile_definitions(wolfssh PRIVATE WOLFSSH_LIB)
+target_compile_definitions(wolfssh PUBLIC WOLFSSH_SFTP WOLFSSH_SCP)
+if(WIN32)
+    target_compile_definitions(wolfssh PRIVATE WIN32 _LIB)
+endif()
+
+message(STATUS "wolfSSH manual target configured - optional SSH/SCP/SFTP server enabled")
+
+# ============================================================
+# Fetch liboqs for ML-KEM (post-quantum cryptography)
+# OpenSSL dependency disabled - we use wolfSSL instead
+# ============================================================
+set(OQS_USE_OPENSSL OFF CACHE BOOL "Disable OpenSSL dependency in liboqs" FORCE)
+set(OQS_BUILD_ONLY_LIB ON CACHE BOOL "Build only liboqs library" FORCE)
+set(OQS_MINIMAL_BUILD "KEM_kyber;KEM_ml_kem" CACHE STRING "Build only Kyber and ML-KEM" FORCE)
+
+FetchContent_Declare(
+    liboqs
+    GIT_REPOSITORY https://github.com/open-quantum-safe/liboqs.git
+    GIT_TAG 0.12.0
+    GIT_SHALLOW ON
+)
+FetchContent_MakeAvailable(liboqs)
+
+target_link_libraries(net_copy_common PUBLIC oqs)
+target_include_directories(net_copy_common PUBLIC ${liboqs_BINARY_DIR}/include)
+message(STATUS "liboqs fetched - ML-KEM authentication will be enabled")
 
 # Windows: link bcrypt for BCryptGenRandom used in sha3.cpp
 if(WIN32)
     target_link_libraries(net_copy_common PUBLIC bcrypt)
 endif()
+
+# Link wolfSSL (vcpkg) and wolfSSH (FetchContent)
+target_link_libraries(net_copy_common PUBLIC wolfssl::wolfssl wolfssh)
+# wolfSSH headers (sources at ${wolfssh_SOURCE_DIR})
+target_include_directories(net_copy_common PUBLIC
+    ${wolfssh_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/include/wolfssl
+)
 
 # Set specific compilation flags for AES-CTR file to enable hardware acceleration
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -289,11 +412,10 @@ add_custom_target(clean_all
 
 # Add a custom target for rebuilding
 add_custom_target(rebuild_all
-    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
+    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_BINARY_DIR}/CMakeCache.txt
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/CMakeFiles
     COMMAND ${CMAKE_COMMAND} -S ${CMAKE_SOURCE_DIR} -B ${CMAKE_BINARY_DIR}
     COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
-
-
