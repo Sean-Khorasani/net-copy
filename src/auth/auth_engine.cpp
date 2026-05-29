@@ -83,5 +83,9 @@ bool AuthEngine::verify_response(const AuthChallengeData& challenge,
     return diff == 0;
 }
 
+bool AuthEngine::verify_password(const std::string& username, const std::string& password) const {
+    return db_.verify_password(username, password);
+}
+
 } // namespace auth
 } // namespace netcopy
