@@ -346,6 +346,9 @@ std::vector<uint8_t> FileRequest::serialize_payload() const {
     
     // Phase 3 Delta sync fields
     write_uint64(buffer, file_size);
+
+    // Phase 4 Timestamp preservation
+    write_uint64(buffer, last_modified);
     return buffer;
 }
 
@@ -389,6 +392,13 @@ void FileRequest::deserialize_payload(const std::vector<uint8_t>& data) {
         file_size = read_uint64(data, offset);
     } else {
         file_size = 0;
+    }
+
+    // Phase 4 Timestamp preservation
+    if (offset < data.size()) {
+        last_modified = read_uint64(data, offset);
+    } else {
+        last_modified = 0;
     }
 }
 
@@ -667,6 +677,9 @@ std::vector<uint8_t> DownloadResponse::serialize_payload() const {
     buffer.push_back(is_symlink ? 1 : 0);
     write_string(buffer, symlink_target);
     write_string(buffer, session_id);
+
+    // Phase 4 Timestamp preservation
+    write_uint64(buffer, last_modified);
     return buffer;
 }
 
@@ -699,6 +712,13 @@ void DownloadResponse::deserialize_payload(const std::vector<uint8_t>& data) {
         session_id = read_string(data, offset);
     } else {
         session_id = "";
+    }
+
+    // Phase 4 Timestamp preservation
+    if (offset < data.size()) {
+        last_modified = read_uint64(data, offset);
+    } else {
+        last_modified = 0;
     }
 }
 
