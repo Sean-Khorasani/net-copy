@@ -49,6 +49,10 @@ std::vector<uint8_t> derive_session_key(
 std::string get_version_string();
 std::string get_build_info();
 
+// Webhook / Notification support
+bool send_http_post(const std::string& url, const std::string& json_payload);
+std::string escape_json(const std::string& s);
+
 // Command-line preprocessing for Windows escaping quirks
 std::vector<std::string> preprocess_arguments(int argc, char* argv[]);
 
