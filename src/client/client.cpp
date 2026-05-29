@@ -20,9 +20,26 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <future>
 
 namespace netcopy {
 namespace client {
+
+namespace {
+template <typename Func>
+size_t execute_io_sync(Func&& async_op) {
+    auto promise = std::make_shared<std::promise<size_t>>();
+    auto future = promise->get_future();
+    async_op([promise](const asio::error_code& ec, size_t bytes) {
+        if (ec) {
+            promise->set_exception(std::make_exception_ptr(std::runtime_error(ec.message())));
+        } else {
+            promise->set_value(bytes);
+        }
+    });
+    return future.get();
+}
+}
 
 Client::Client()
     : config_(config::ClientConfig::get_default()),
@@ -30,17 +47,17 @@ Client::Client()
       sequence_number_(1),
       security_level_(crypto::SecurityLevel::HIGH),
       negotiated_security_level_(crypto::SecurityLevel::HIGH),
-      negotiated_max_chunk_size_(config_.max_chunk_size),
+      negotiated_max_chunk_size_(config_.internal.max_chunk_size),
       requested_parallel_streams_((std::max)(1u, (std::min)(8u, std::thread::hardware_concurrency() == 0 ? 1u : std::thread::hardware_concurrency()))),
       negotiated_parallel_streams_(1),
       server_allows_auto_create_directories_(false),
       cancel_requested_(false),
       server_port_(0),
       bandwidth_limiter_(std::make_shared<common::BandwidthLimiter>()) {
-    chunk_size_manager_.set_limits(config_.initial_chunk_size, config_.min_chunk_size, config_.max_chunk_size);
+    chunk_size_manager_.set_limits(config_.internal.initial_chunk_size, config_.internal.min_chunk_size, config_.internal.max_chunk_size);
     chunk_size_manager_.set_adaptation_parameters(
-        config_.chunk_size_increase_factor,
-        config_.chunk_size_decrease_factor,
+        config_.internal.chunk_size_increase_factor,
+        config_.internal.chunk_size_decrease_factor,
         0.3);
     bandwidth_limiter_->set_limit_percent(config_.max_bandwidth_percent);
 }
@@ -53,18 +70,18 @@ void Client::load_config(const std::string& config_file) {
     config_ = config::ClientConfig::load_from_file(config_file);
 
     auto& logger = logging::Logger::instance();
-    logger.set_level(logging::Logger::string_to_level(config_.log_level));
-    logger.set_console_output(config_.console_output);
-    if (!config_.log_file.empty()) {
-        logger.set_file_output(config_.log_file);
+    logger.set_level(logging::Logger::string_to_level(config_.logging.level));
+    logger.set_console_output(config_.console.enable);
+    if (!config_.logging.file.empty()) {
+        logger.set_file_output(config_.logging.file);
     }
 
-    chunk_size_manager_.set_limits(config_.initial_chunk_size, config_.min_chunk_size, config_.max_chunk_size);
+    chunk_size_manager_.set_limits(config_.internal.initial_chunk_size, config_.internal.min_chunk_size, config_.internal.max_chunk_size);
     chunk_size_manager_.set_adaptation_parameters(
-        config_.chunk_size_increase_factor,
-        config_.chunk_size_decrease_factor,
+        config_.internal.chunk_size_increase_factor,
+        config_.internal.chunk_size_decrease_factor,
         0.3);
-    negotiated_max_chunk_size_ = config_.max_chunk_size;
+    negotiated_max_chunk_size_ = config_.internal.max_chunk_size;
     server_allows_auto_create_directories_ = false;
     cancel_requested_ = false;
     bandwidth_limiter_->set_limit_percent(config_.max_bandwidth_percent);
@@ -72,14 +89,11 @@ void Client::load_config(const std::string& config_file) {
 
 void Client::set_config(const config::ClientConfig& config) {
     config_ = config;
-    chunk_size_manager_.set_limits(config_.initial_chunk_size, config_.min_chunk_size, config_.max_chunk_size);
+    chunk_size_manager_.set_limits(config_.internal.initial_chunk_size, config_.internal.min_chunk_size, config_.internal.max_chunk_size);
     chunk_size_manager_.set_adaptation_parameters(
-        config_.chunk_size_increase_factor,
-        config_.chunk_size_decrease_factor,
+        config_.internal.chunk_size_increase_factor,
+        config_.internal.chunk_size_decrease_factor,
         0.3);
-    negotiated_max_chunk_size_ = config_.max_chunk_size;
-    server_allows_auto_create_directories_ = false;
-    cancel_requested_ = false;
     bandwidth_limiter_->set_limit_percent(config_.max_bandwidth_percent);
 }
 
@@ -89,38 +103,170 @@ const config::ClientConfig& Client::get_config() const {
 
 void Client::connect(const std::string& server_address, uint16_t port) {
     try {
-        socket_ = std::make_unique<network::Socket>();
-        // Apply timeout only for the connect/handshake phase.
-        socket_->set_timeout(config_.timeout);
-        socket_->connect(server_address, port);
+        event_loop_ = std::make_shared<network::EventLoop>(2);
+        event_loop_->start();
+
+        async_socket_ = std::make_shared<network::AsyncSocket>(*event_loop_);
         
-        // Disable Nagle's algorithm; respect configurable socket buffer sizes
-        socket_->set_tcp_nodelay(true);
-        if (config_.socket_buffer_size > 0) {
-            socket_->set_buffer_sizes(config_.socket_buffer_size, config_.socket_buffer_size);
+        auto connect_promise = std::make_shared<std::promise<asio::error_code>>();
+        auto connect_future = connect_promise->get_future();
+        async_socket_->connect(server_address, port, [connect_promise](const asio::error_code& ec) {
+            connect_promise->set_value(ec);
+        });
+        
+        asio::error_code ec = connect_future.get();
+        if (ec) {
+            throw std::runtime_error("Connect failed: " + ec.message());
         }
-        
+
+        async_socket_->native_socket().set_option(asio::ip::tcp::no_delay(true));
+        if (config_.socket_buffer_size > 0) {
+            asio::socket_base::send_buffer_size option_send(static_cast<int>(config_.socket_buffer_size));
+            asio::socket_base::receive_buffer_size option_recv(static_cast<int>(config_.socket_buffer_size));
+            async_socket_->native_socket().set_option(option_send);
+            async_socket_->native_socket().set_option(option_recv);
+        }
+
+        if (config_.tls.enable) {
+            ssl_ctx_ = std::make_unique<asio::ssl::context>(asio::ssl::context::tls_client);
+            if (!config_.tls.trusted_chain_file.empty()) {
+                ssl_ctx_->load_verify_file(config_.tls.trusted_chain_file);
+            } else {
+                ssl_ctx_->set_default_verify_paths();
+            }
+            if (config_.tls.server_cert_validation) {
+                ssl_ctx_->set_verify_mode(asio::ssl::verify_peer);
+            } else {
+                ssl_ctx_->set_verify_mode(asio::ssl::verify_none);
+            }
+            async_socket_->enable_tls(*ssl_ctx_);
+            
+            auto handshake_promise = std::make_shared<std::promise<asio::error_code>>();
+            auto handshake_future = handshake_promise->get_future();
+            async_socket_->async_handshake(asio::ssl::stream_base::client, [handshake_promise](const asio::error_code& ec) {
+                handshake_promise->set_value(ec);
+            });
+            
+            asio::error_code hec = handshake_future.get();
+            if (hec) {
+                throw std::runtime_error("TLS handshake failed: " + hec.message());
+            }
+        }
+
         server_address_ = server_address;
         server_port_ = port;
         perform_handshake();
-
-        // Remove the timeout after handshake so data-transfer I/O (ACK
-        // listener etc.) is never cut short by SO_RCVTIMEO/SO_SNDTIMEO.
-        // The OS TCP keep-alive and explicit flow-control handle stalls.
-        socket_->set_timeout(0);
 
         connected_ = true;
         clear_error();
     } catch (const std::exception& e) {
         connected_ = false;
         set_error(e.what());
-        socket_.reset();
+        if (async_socket_) {
+            async_socket_->disconnect();
+        }
+        async_socket_.reset();
+        ssl_ctx_.reset();
+        if (event_loop_) {
+            event_loop_->stop();
+        }
+        event_loop_.reset();
+        throw;
+    }
+}
+
+void Client::connect_via_relay(const std::string& relay_address, const std::string& token) {
+    try {
+        std::string host;
+        uint16_t port = 1245;
+        size_t colon = relay_address.find(':');
+        if (colon != std::string::npos) {
+            host = relay_address.substr(0, colon);
+            port = static_cast<uint16_t>(std::stoi(relay_address.substr(colon + 1)));
+        } else {
+            host = relay_address;
+        }
+
+        event_loop_ = std::make_shared<network::EventLoop>(2);
+        event_loop_->start();
+
+        async_socket_ = std::make_shared<network::AsyncSocket>(*event_loop_);
+        
+        auto connect_promise = std::make_shared<std::promise<asio::error_code>>();
+        auto connect_future = connect_promise->get_future();
+        async_socket_->connect(host, port, [connect_promise](const asio::error_code& ec) {
+            connect_promise->set_value(ec);
+        });
+        
+        asio::error_code ec = connect_future.get();
+        if (ec) {
+            throw std::runtime_error("Failed to connect to relay: " + ec.message());
+        }
+
+        async_socket_->native_socket().set_option(asio::ip::tcp::no_delay(true));
+        if (config_.socket_buffer_size > 0) {
+            asio::socket_base::send_buffer_size option_send(static_cast<int>(config_.socket_buffer_size));
+            asio::socket_base::receive_buffer_size option_recv(static_cast<int>(config_.socket_buffer_size));
+            async_socket_->native_socket().set_option(option_send);
+            async_socket_->native_socket().set_option(option_recv);
+        }
+
+        // Send RELAY_CONNECT command
+        std::string conn_cmd = "RELAY_CONNECT " + token + "\n";
+        execute_io_sync([&](auto&& handler) {
+            async_socket_->async_write(conn_cmd.data(), conn_cmd.size(), std::move(handler));
+        });
+
+        if (config_.tls.enable) {
+            ssl_ctx_ = std::make_unique<asio::ssl::context>(asio::ssl::context::tls_client);
+            if (!config_.tls.trusted_chain_file.empty()) {
+                ssl_ctx_->load_verify_file(config_.tls.trusted_chain_file);
+            } else {
+                ssl_ctx_->set_default_verify_paths();
+            }
+            if (config_.tls.server_cert_validation) {
+                ssl_ctx_->set_verify_mode(asio::ssl::verify_peer);
+            } else {
+                ssl_ctx_->set_verify_mode(asio::ssl::verify_none);
+            }
+            async_socket_->enable_tls(*ssl_ctx_);
+            
+            auto handshake_promise = std::make_shared<std::promise<asio::error_code>>();
+            auto handshake_future = handshake_promise->get_future();
+            async_socket_->async_handshake(asio::ssl::stream_base::client, [handshake_promise](const asio::error_code& ec) {
+                handshake_promise->set_value(ec);
+            });
+            
+            asio::error_code hec = handshake_future.get();
+            if (hec) {
+                throw std::runtime_error("TLS handshake failed over relay: " + hec.message());
+            }
+        }
+
+        server_address_ = host;
+        server_port_ = port;
+        perform_handshake();
+
+        connected_ = true;
+        clear_error();
+    } catch (const std::exception& e) {
+        connected_ = false;
+        set_error(e.what());
+        if (async_socket_) {
+            async_socket_->disconnect();
+        }
+        async_socket_.reset();
+        ssl_ctx_.reset();
+        if (event_loop_) {
+            event_loop_->stop();
+        }
+        event_loop_.reset();
         throw;
     }
 }
 
 void Client::disconnect() {
-    if (connected_ && socket_) {
+    if (connected_ && async_socket_) {
         try {
             protocol::Disconnect msg;
             send_message(msg);
@@ -128,47 +274,20 @@ void Client::disconnect() {
             // Ignore errors during disconnect message sending
         }
     }
-    if (socket_) {
-        socket_->close();
+    if (async_socket_) {
+        async_socket_->disconnect();
     }
-    socket_.reset();
+    async_socket_.reset();
+    ssl_ctx_.reset();
+    if (event_loop_) {
+        event_loop_->stop();
+    }
+    event_loop_.reset();
     connected_ = false;
 }
 
 bool Client::is_connected() const {
-    if (!connected_ || !socket_ || !socket_->is_valid()) {
-        return false;
-    }
-    
-    // Perform a non-blocking check to see if the server closed the socket
-    socket_t fd = socket_->native_handle();
-    fd_set rfd;
-    FD_ZERO(&rfd);
-    FD_SET(fd, &rfd);
-    
-    timeval tv;
-    tv.tv_sec = 0;
-    tv.tv_usec = 0;
-    
-    int select_result = select(static_cast<int>(fd + 1), &rfd, nullptr, nullptr, &tv);
-    if (select_result > 0) {
-        char buf[1];
-#ifdef _WIN32
-        int recv_result = recv(fd, buf, 1, MSG_PEEK);
-#else
-        int recv_result = recv(fd, buf, 1, MSG_PEEK | MSG_DONTWAIT);
-#endif
-        if (recv_result <= 0) {
-            // EOF or error
-            const_cast<Client*>(this)->connected_ = false;
-            return false;
-        }
-    } else if (select_result < 0) {
-        const_cast<Client*>(this)->connected_ = false;
-        return false;
-    }
-    
-    return true;
+    return connected_ && async_socket_ && async_socket_->is_open();
 }
 
 void Client::set_security_level(crypto::SecurityLevel level) {
@@ -183,7 +302,14 @@ void Client::transfer_file(const std::string& local_path, const std::string& rem
         throw FileException("Source is not a regular file: " + local_path);
     }
 
-    transfer_single_file(local_path, remote_path, resume);
+    try {
+        uint64_t file_size = file::FileManager::file_size(local_path);
+        transfer_single_file(local_path, remote_path, resume);
+        trigger_webhook("upload", local_path, remote_path, "success", file_size);
+    } catch (const std::exception& e) {
+        trigger_webhook("upload", local_path, remote_path, "failed", 0, e.what());
+        throw;
+    }
 }
 
 void Client::transfer_directory(const std::string& local_path,
@@ -197,178 +323,201 @@ void Client::transfer_directory(const std::string& local_path,
         throw FileException("Source is not a directory: " + local_path);
     }
 
-    auto files = file::FileManager::list_directory(local_path, recursive);
-    
-    struct FileTransferTask {
-        std::string local_path;
-        std::string remote_path;
-    };
-    std::vector<FileTransferTask> file_tasks;
-    
-    // Normalize local_path using filesystem path
-    std::filesystem::path p_local = std::filesystem::u8path(local_path).lexically_normal();
-    std::string norm_local = p_local.u8string();
-    while (!norm_local.empty() && (norm_local.back() == '/' || norm_local.back() == '\\')) {
-        norm_local.pop_back();
-    }
-    std::string norm_local_cmp = norm_local;
+    uint64_t total_bytes = 0;
+    uint32_t files_transferred = 0;
+
+    try {
+        auto files = file::FileManager::list_directory(local_path, recursive);
+        
+        struct FileTransferTask {
+            std::string local_path;
+            std::string remote_path;
+        };
+        std::vector<FileTransferTask> file_tasks;
+        
+        // Normalize local_path using filesystem path
+        std::filesystem::path p_local = std::filesystem::u8path(local_path).lexically_normal();
+        std::string norm_local = p_local.u8string();
+        while (!norm_local.empty() && (norm_local.back() == '/' || norm_local.back() == '\\')) {
+            norm_local.pop_back();
+        }
+        std::string norm_local_cmp = norm_local;
 #ifdef _WIN32
-    // Windows is case-insensitive
-    std::transform(norm_local_cmp.begin(), norm_local_cmp.end(), norm_local_cmp.begin(), ::tolower);
+        // Windows is case-insensitive
+        std::transform(norm_local_cmp.begin(), norm_local_cmp.end(), norm_local_cmp.begin(), ::tolower);
 #endif
 
-    std::vector<std::pair<std::string, uint64_t>> files_to_report;
+        std::vector<std::pair<std::string, uint64_t>> files_to_report;
 
-    for (const auto& entry : files) {
-        std::filesystem::path p_entry = std::filesystem::u8path(entry.path).lexically_normal();
-        std::string norm_entry = p_entry.u8string();
-        std::string norm_entry_cmp = norm_entry;
+        for (const auto& entry : files) {
+            std::filesystem::path p_entry = std::filesystem::u8path(entry.path).lexically_normal();
+            std::string norm_entry = p_entry.u8string();
+            std::string norm_entry_cmp = norm_entry;
 #ifdef _WIN32
-        std::transform(norm_entry_cmp.begin(), norm_entry_cmp.end(), norm_entry_cmp.begin(), ::tolower);
+            std::transform(norm_entry_cmp.begin(), norm_entry_cmp.end(), norm_entry_cmp.begin(), ::tolower);
 #endif
 
-        std::string relative = entry.path;
-        if (norm_entry_cmp.rfind(norm_local_cmp, 0) == 0) {
-            relative = norm_entry.substr(norm_local.length());
-        }
-        while (!relative.empty() && (relative.front() == '/' || relative.front() == '\\')) {
-            relative.erase(relative.begin());
-        }
+            std::string relative = entry.path;
+            if (norm_entry_cmp.rfind(norm_local_cmp, 0) == 0) {
+                relative = norm_entry.substr(norm_local.length());
+            }
+            while (!relative.empty() && (relative.front() == '/' || relative.front() == '\\')) {
+                relative.erase(relative.begin());
+            }
 
-        std::string destination = file::FileManager::join_path(remote_path, common::convert_to_unix_path(relative));
-        if (entry.is_directory) {
-            if (config_.create_empty_directories) {
-                if (!server_allows_auto_create_directories_) {
-                    throw FileException("Server policy does not allow empty directory creation: " + destination);
-                }
-                create_empty_directory(destination);
-            }
-        } else {
-            file_tasks.push_back({entry.path, destination});
-            files_to_report.push_back({entry.path, entry.size});
-        }
-    }
-    
-    if (file_list_callback_) {
-        file_list_callback_(files_to_report);
-    }
-    
-    if (file_tasks.empty()) {
-        return;
-    }
-    
-    uint32_t max_threads = negotiated_parallel_streams_ == 0 ? 1 : negotiated_parallel_streams_;
-    if (max_threads <= 1 || file_tasks.size() <= 1) {
-        // Sequential transfer
-        for (const auto& task : file_tasks) {
-            try {
-                transfer_single_file(task.local_path, task.remote_path, resume);
-            } catch (const FileSkippedException& e) {
-                LOG_INFO("File skipped: " + task.local_path);
-                disconnect();
-                connect(server_address_, server_port_);
-            }
-        }
-        return;
-    }
-    
-    // Concurrent transfer over multiple socket connections
-    std::mutex queue_mutex;
-    size_t next_task_idx = 0;
-    std::exception_ptr first_error;
-    std::mutex error_mutex;
-    
-    auto record_error = [&](std::exception_ptr error) {
-        std::lock_guard<std::mutex> lock(error_mutex);
-        if (!first_error) {
-            first_error = error;
-        }
-    };
-    
-    uint32_t num_threads = (std::min)(max_threads, static_cast<uint32_t>(file_tasks.size()));
-    std::mutex progress_callback_mutex;
-    auto safe_progress_callback = [&](uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file) {
-        if (progress_callback_) {
-            std::lock_guard<std::mutex> lock(progress_callback_mutex);
-            progress_callback_(bytes_transferred, total_bytes, current_file);
-        }
-    };
-    
-    auto worker_body = [&]() {
-        try {
-            Client stream_client;
-            stream_client.set_config(config_);
-            stream_client.set_security_level(security_level_);
-            stream_client.set_requested_parallel_streams(1); // Enforce single thread/connection per file transfer
-            stream_client.bandwidth_limiter_ = bandwidth_limiter_;
-            stream_client.set_progress_callback(safe_progress_callback); // Propagate progress callback safely
-            stream_client.set_overwrite_callback(overwrite_callback_);
-            stream_client.parent_client_ = this;
-            
-            {
-                std::lock_guard<std::mutex> lock(workers_mutex_);
-                if (cancel_requested_) {
-                    return;
-                }
-                active_workers_.push_back(&stream_client);
-            }
-            
-            struct Cleanup {
-                Client* client;
-                std::mutex& mutex;
-                std::vector<Client*>& workers;
-                ~Cleanup() {
-                    std::lock_guard<std::mutex> lock(mutex);
-                    auto it = std::find(workers.begin(), workers.end(), client);
-                    if (it != workers.end()) {
-                        workers.erase(it);
+            std::string destination = file::FileManager::join_path(remote_path, common::convert_to_unix_path(relative));
+            if (entry.is_directory) {
+                if (config_.create_empty_directories) {
+                    if (!server_allows_auto_create_directories_) {
+                        throw FileException("Server policy does not allow empty directory creation: " + destination);
                     }
+                    create_empty_directory(destination);
                 }
-            } cleanup{&stream_client, workers_mutex_, active_workers_};
-
-            stream_client.connect(server_address_, server_port_);
-            
-            while (true) {
-                if (cancel_requested_ || stream_client.cancel_requested_) {
-                    break;
-                }
-                size_t idx;
-                {
-                    std::lock_guard<std::mutex> lock(queue_mutex);
-                    if (next_task_idx >= file_tasks.size() || first_error) {
-                        break;
-                    }
-                    idx = next_task_idx++;
-                }
-                
-                const auto& task = file_tasks[idx];
+            } else {
+                file_tasks.push_back({entry.path, destination});
+                files_to_report.push_back({entry.path, entry.size});
+                total_bytes += entry.size;
+                files_transferred++;
+            }
+        }
+        
+        if (file_list_callback_) {
+            file_list_callback_(files_to_report);
+        }
+        
+        if (file_tasks.empty()) {
+            trigger_webhook("upload", local_path, remote_path, "success", 0, "", 0);
+            return;
+        }
+        
+        uint32_t max_threads = negotiated_parallel_streams_ == 0 ? 1 : negotiated_parallel_streams_;
+        if (max_threads <= 1 || file_tasks.size() <= 1) {
+            // Sequential transfer
+            for (const auto& task : file_tasks) {
                 try {
-                    stream_client.transfer_single_file(task.local_path, task.remote_path, resume);
+                    transfer_single_file(task.local_path, task.remote_path, resume);
                 } catch (const FileSkippedException& e) {
                     LOG_INFO("File skipped: " + task.local_path);
-                    stream_client.disconnect();
-                    stream_client.connect(server_address_, server_port_);
+                    disconnect();
+                    connect(server_address_, server_port_);
                 }
             }
+            trigger_webhook("upload", local_path, remote_path, "success", total_bytes, "", files_transferred);
+            return;
+        }
+        
+        // Concurrent transfer over multiple socket connections
+        std::mutex queue_mutex;
+        size_t next_task_idx = 0;
+        std::exception_ptr first_error;
+        std::mutex error_mutex;
+        
+        auto record_error = [&](std::exception_ptr error) {
+            std::lock_guard<std::mutex> lock(error_mutex);
+            if (!first_error) {
+                first_error = error;
+            }
+            request_cancel();
+        };
+        
+        uint32_t num_threads = (std::min)(max_threads, static_cast<uint32_t>(file_tasks.size()));
+        std::mutex progress_callback_mutex;
+        auto safe_progress_callback = [&](uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file) {
+            if (progress_callback_) {
+                std::lock_guard<std::mutex> lock(progress_callback_mutex);
+                progress_callback_(bytes_transferred, total_bytes, current_file);
+            }
+        };
+        
+        auto worker_body = [&]() {
+            try {
+                Client stream_client;
+                stream_client.set_config(config_);
+                stream_client.set_security_level(security_level_);
+                stream_client.set_requested_parallel_streams(1); // Enforce single thread/connection per file transfer
+                stream_client.bandwidth_limiter_ = bandwidth_limiter_;
+                stream_client.set_progress_callback(safe_progress_callback); // Propagate progress callback safely
+                stream_client.set_overwrite_callback(overwrite_callback_);
+                stream_client.parent_client_ = this;
+                
+                {
+                    std::lock_guard<std::mutex> lock(workers_mutex_);
+                    if (cancel_requested_) {
+                        return;
+                    }
+                    active_workers_.push_back(&stream_client);
+                }
+                
+                struct Cleanup {
+                    Client* client;
+                    std::mutex& mutex;
+                    std::vector<Client*>& workers;
+                    ~Cleanup() {
+                        std::lock_guard<std::mutex> lock(mutex);
+                        auto it = std::find(workers.begin(), workers.end(), client);
+                        if (it != workers.end()) {
+                            workers.erase(it);
+                        }
+                    }
+                } cleanup{&stream_client, workers_mutex_, active_workers_};
+
+                stream_client.connect(server_address_, server_port_);
+                
+                while (true) {
+                    if (cancel_requested_ || stream_client.cancel_requested_) {
+                        break;
+                    }
+                    size_t idx;
+                    {
+                        std::lock_guard<std::mutex> lock(queue_mutex);
+                        if (next_task_idx >= file_tasks.size() || first_error) {
+                            break;
+                        }
+                        idx = next_task_idx++;
+                    }
+                    
+                    const auto& task = file_tasks[idx];
+                    try {
+                        stream_client.transfer_single_file(task.local_path, task.remote_path, resume);
+                    } catch (const FileSkippedException& e) {
+                        LOG_INFO("File skipped: " + task.local_path);
+                        stream_client.disconnect();
+                        stream_client.connect(server_address_, server_port_);
+                    }
+                }
+            } catch (...) {
+                record_error(std::current_exception());
+            }
+        };
+        
+        std::vector<std::thread> workers;
+        workers.reserve(num_threads);
+        try {
+            for (uint32_t i = 0; i < num_threads; ++i) {
+                workers.emplace_back(worker_body);
+            }
         } catch (...) {
-            record_error(std::current_exception());
+            for (auto& worker : workers) {
+                if (worker.joinable()) {
+                    worker.join();
+                }
+            }
+            throw;
         }
-    };
-    
-    std::vector<std::thread> workers;
-    workers.reserve(num_threads);
-    for (uint32_t i = 0; i < num_threads; ++i) {
-        workers.emplace_back(worker_body);
-    }
-    
-    for (auto& worker : workers) {
-        if (worker.joinable()) {
-            worker.join();
+        
+        for (auto& worker : workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
         }
-    }
-    
-    if (first_error) {
-        std::rethrow_exception(first_error);
+        
+        if (first_error) {
+            std::rethrow_exception(first_error);
+        }
+        trigger_webhook("upload", local_path, remote_path, "success", total_bytes, "", files_transferred);
+    } catch (const std::exception& e) {
+        trigger_webhook("upload", local_path, remote_path, "failed", total_bytes, e.what(), files_transferred);
+        throw;
     }
 }
 
@@ -460,9 +609,9 @@ void Client::perform_handshake() {
     request.file_size = 0;
     request.requested_parallel_streams = requested_parallel_streams_;
     // Set auth fields
-    request.username = config_.username;
-    if (config_.auth_method == "password")      request.auth_method_id = 1;
-    else if (config_.auth_method == "mlkem")    request.auth_method_id = 2;
+    request.username = config_.internal.username;
+    if (config_.internal.auth_method == "password")      request.auth_method_id = 1;
+    else if (config_.internal.auth_method == "mlkem")    request.auth_method_id = 2;
     else                                         request.auth_method_id = 0;
 
     send_message(request);
@@ -474,21 +623,31 @@ void Client::perform_handshake() {
     }
 
     negotiated_security_level_ = response->accepted_security_level;
+    if (negotiated_security_level_ != security_level_) {
+        std::string req_name = (security_level_ == crypto::SecurityLevel::HIGH) ? "HIGH" :
+                               (security_level_ == crypto::SecurityLevel::FAST) ? "FAST" :
+                               (security_level_ == crypto::SecurityLevel::AES) ? "AES" : "AES_256_GCM";
+        std::string neg_name = (negotiated_security_level_ == crypto::SecurityLevel::HIGH) ? "HIGH" :
+                               (negotiated_security_level_ == crypto::SecurityLevel::FAST) ? "FAST" :
+                               (negotiated_security_level_ == crypto::SecurityLevel::AES) ? "AES" : "AES_256_GCM";
+        throw CryptoException("Security level mismatch: client requested " + req_name + 
+                              " but server negotiated " + neg_name);
+    }
     negotiated_max_chunk_size_ = response->max_chunk_size == 0
-        ? config_.max_chunk_size
-        : (std::min)(config_.max_chunk_size, static_cast<size_t>(response->max_chunk_size));
+        ? config_.internal.max_chunk_size
+        : (std::min)(config_.internal.max_chunk_size, static_cast<size_t>(response->max_chunk_size));
     negotiated_parallel_streams_ = response->accepted_parallel_streams == 0 ? 1 : response->accepted_parallel_streams;
     server_allows_auto_create_directories_ = response->auto_create_directories_allowed;
     chunk_size_manager_.set_max_chunk_size(negotiated_max_chunk_size_);
     if (response->authentication_required) {
-        if (config_.secret_key.empty()) {
+        if (config_.internal.secret_key.empty()) {
             throw CryptoException("Server requires authentication but no secret key is configured");
         }
-        crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, config_.secret_key);
+        crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, config_.internal.secret_key);
         
         // Derive dynamic session key with nonces
         auto derived = common::derive_session_key(
-            config_.secret_key,
+            config_.internal.secret_key,
             {},
             response->server_nonce,
             request.client_nonce);
@@ -498,7 +657,7 @@ void Client::perform_handshake() {
     }
 
     // User authentication phase
-    if (!config_.username.empty() && config_.auth_method != "none" && request.auth_method_id != 0) {
+    if (!config_.internal.username.empty() && config_.internal.auth_method != "none" && request.auth_method_id != 0) {
         auto challenge_msg = receive_message();
         auto* auth_challenge = dynamic_cast<protocol::AuthChallenge*>(challenge_msg.get());
         if (!auth_challenge) {
@@ -511,7 +670,7 @@ void Client::perform_handshake() {
         if (auth_challenge->method == 1) { // PASSWORD
             // Derive key from password
             auto salt = crypto::hex_to_bytes(auth_challenge->salt_hex);
-            auto dk = crypto::pbkdf2_sha3_256(config_.password, salt,
+            auto dk = crypto::pbkdf2_sha3_256(config_.internal.password, salt,
                                                auth_challenge->pbkdf2_iterations, 32);
             // proof = SHA3-256(dk || challenge_nonce)
             std::vector<uint8_t> preimage = dk;
@@ -521,12 +680,12 @@ void Client::perform_handshake() {
             proof = crypto::sha3_256(preimage);
 
         } else if (auth_challenge->method == 2) { // ML-KEM
-            if (config_.private_key_file.empty()) {
+            if (config_.internal.private_key_file.empty()) {
                 throw CryptoException("ML-KEM private key file not configured");
             }
             crypto::MlKemLevel level;
-            auto privkey = crypto::load_private_key(config_.private_key_file, level,
-                                                     config_.private_key_passphrase);
+            auto privkey = crypto::load_private_key(config_.internal.private_key_file, level,
+                                                     config_.internal.private_key_passphrase);
             auto shared_secret = crypto::MlKem::decapsulate(privkey,
                                                              auth_challenge->kem_ciphertext,
                                                              level);
@@ -549,11 +708,11 @@ void Client::perform_handshake() {
             std::string err = auth_result ? auth_result->error_message : "No auth result";
             throw AuthException("Authentication failed: " + err);
         }
-        LOG_INFO("Authenticated as '" + config_.username + "'");
+        LOG_INFO("Authenticated as '" + config_.internal.username + "'");
 
         if (auth_challenge->method == 2 && crypto_engine_) {
             auto derived = common::derive_session_key(
-                config_.secret_key,
+                config_.internal.secret_key,
                 mlkem_shared_secret,
                 response->server_nonce,
                 request.client_nonce);
@@ -565,7 +724,7 @@ void Client::perform_handshake() {
 }
 
 void Client::send_message(const protocol::Message& message) {
-    if (!socket_) {
+    if (!async_socket_) {
         throw NetworkException("Socket is not connected");
     }
 
@@ -575,27 +734,48 @@ void Client::send_message(const protocol::Message& message) {
     }
 
     uint32_t length = htonl(static_cast<uint32_t>(data.size()));
-    socket_->send(&length, sizeof(length));
+    execute_io_sync([&](auto&& handler) {
+        async_socket_->async_write(&length, sizeof(length), std::move(handler));
+    });
 
     size_t total_sent = 0;
     while (total_sent < data.size()) {
-        total_sent += socket_->send(data.data() + total_sent, data.size() - total_sent);
+        size_t sent = execute_io_sync([&](auto&& handler) {
+            async_socket_->async_write(data.data() + total_sent, data.size() - total_sent, std::move(handler));
+        });
+        if (sent == 0) {
+            throw NetworkException("Failed to send message data (0 bytes sent)");
+        }
+        total_sent += sent;
     }
 }
 
 std::unique_ptr<protocol::Message> Client::receive_message() {
-    if (!socket_) {
+    if (!async_socket_) {
         throw NetworkException("Socket is not connected");
     }
 
     uint32_t length_net = 0;
-    socket_->receive(&length_net, sizeof(length_net));
+    execute_io_sync([&](auto&& handler) {
+        async_socket_->async_read(&length_net, sizeof(length_net), std::move(handler));
+    });
     uint32_t length = ntohl(length_net);
+
+    // Safety check on length to avoid bad_alloc crash
+    if (length > 64 * 1024 * 1024) {
+        throw ProtocolException("Client received a message with length exceeding the 64MB limit: " + std::to_string(length) + " bytes");
+    }
 
     std::vector<uint8_t> data(length);
     size_t total_received = 0;
     while (total_received < data.size()) {
-        total_received += socket_->receive(data.data() + total_received, data.size() - total_received);
+        size_t received = execute_io_sync([&](auto&& handler) {
+            async_socket_->async_read(data.data() + total_received, data.size() - total_received, std::move(handler));
+        });
+        if (received == 0) {
+            throw NetworkException("Failed to receive message data (0 bytes received)");
+        }
+        total_received += received;
     }
 
     if (crypto_engine_) {
@@ -626,7 +806,10 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
 
     uint64_t resume_offset = 0;
     uint64_t remote_file_size = 0;
-    send_file_request(local_path, remote_path, resume, !resume, resume_offset, &remote_file_size);
+    // Probe the destination without arming truncation. Delta sync needs the
+    // existing remote file as its basis, and overwrite mode re-arms truncation
+    // after the overwrite decision is known.
+    send_file_request(local_path, remote_path, resume, false, resume_offset, &remote_file_size);
     if (resume_offset > total_size) {
         throw FileException("Resume offset is larger than source file");
     }
@@ -653,6 +836,9 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         
         if (do_delta_sync) {
             LOG_INFO("Remote file exists (size " + std::to_string(remote_file_size) + " bytes). Performing delta sync for " + local_path);
+            auto should_cancel = [&]() {
+                return cancel_requested_.load();
+            };
         
         // 1. Send BlockHashesRequest
         protocol::BlockHashesRequest req;
@@ -673,7 +859,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         
         // 3. Compute local block hashes
         uint64_t block_size = resp->block_size > 0 ? resp->block_size : 65536;
-        auto local_hashes = file::FileManager::compute_block_hashes(local_path, block_size);
+        auto local_hashes = file::FileManager::compute_block_hashes(local_path, block_size, should_cancel);
         
         // 4. Compare hashes block by block
         struct BlockRange {
@@ -711,11 +897,11 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         
         auto make_chunk_manager = [&]() {
             return common::ChunkSizeManager(
-                config_.initial_chunk_size,
-                config_.min_chunk_size,
+                config_.internal.initial_chunk_size,
+                config_.internal.min_chunk_size,
                 negotiated_max_chunk_size_,
-                config_.chunk_size_increase_factor,
-                config_.chunk_size_decrease_factor,
+                config_.internal.chunk_size_increase_factor,
+                config_.internal.chunk_size_decrease_factor,
                 0.3);
         };
         
@@ -729,13 +915,11 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         uint64_t matching_bytes = total_size > total_diff_bytes ? total_size - total_diff_bytes : 0;
         std::atomic<uint64_t> total_transferred(matching_bytes);
         
-        auto make_progress_callback = [&](uint64_t range_start) {
-            return [&, range_start](uint64_t delta) {
-                uint64_t current = total_transferred.fetch_add(delta) + delta;
-                if (progress_callback_) {
-                    progress_callback_(current, total_size, local_path);
-                }
-            };
+        auto progress_callback_lambda = [&](uint64_t delta) {
+            uint64_t current = total_transferred.fetch_add(delta) + delta;
+            if (progress_callback_) {
+                progress_callback_(current, total_size, local_path);
+            }
         };
         
         if (merged_diffs.empty()) {
@@ -768,7 +952,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
                     total_size,
                     chunk_manager,
                     transfer_monitor,
-                    make_progress_callback(diff.offset),
+                    progress_callback_lambda,
                     is_last_diff
                 );
             }
@@ -777,7 +961,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         // E2E Integrity verification
         if (total_size > 0 && !merged_diffs.empty()) {
             LOG_INFO("Performing E2E integrity check for: " + local_path);
-            auto local_hash = file::FileManager::compute_file_hash(local_path);
+            auto local_hash = file::FileManager::compute_file_hash(local_path, should_cancel);
             
             protocol::FileVerifyRequest verify_req;
             verify_req.file_path = remote_path;
@@ -803,6 +987,9 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
     }
 
     if (!is_sym && remote_file_size > 0 && !resume && !do_delta_sync) {
+        send_file_request(local_path, remote_path, false, true, resume_offset, &remote_file_size);
+        resume_offset = 0;
+
         // Send a 0-byte chunk to force the server to safely truncate the file before multiple streams write to it
         protocol::FileData data_msg;
         data_msg.offset = 0;
@@ -829,11 +1016,11 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
     common::BandwidthMonitor transfer_monitor;
     auto make_chunk_manager = [&]() {
         return common::ChunkSizeManager(
-            config_.initial_chunk_size,
-            config_.min_chunk_size,
+            config_.internal.initial_chunk_size,
+            config_.internal.min_chunk_size,
             negotiated_max_chunk_size_,
-            config_.chunk_size_increase_factor,
-            config_.chunk_size_decrease_factor,
+            config_.internal.chunk_size_increase_factor,
+            config_.internal.chunk_size_decrease_factor,
             0.3);
     };
     if (stream_count <= 1 || total_size == resume_offset) {
@@ -860,14 +1047,12 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         request_cancel();
     };
 
-    auto make_progress_callback = [&]() {
-        return [&](uint64_t delta) {
-            uint64_t current = transferred.fetch_add(delta) + delta;
-            if (progress_callback_) {
-                std::lock_guard<std::mutex> lock(progress_mutex);
-                progress_callback_(current, total_size, local_path);
-            }
-        };
+    auto progress_callback_lambda = [&](uint64_t delta) {
+        uint64_t current = transferred.fetch_add(delta) + delta;
+        if (progress_callback_) {
+            std::lock_guard<std::mutex> lock(progress_mutex);
+            progress_callback_(current, total_size, local_path);
+        }
     };
 
     auto worker_body = [&](uint32_t stream_index) {
@@ -916,7 +1101,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
                                                total_size,
                                                worker_chunk_manager,
                                                transfer_monitor,
-                                               make_progress_callback(),
+                                               progress_callback_lambda,
                                                false);
             }
         } catch (...) {
@@ -926,8 +1111,17 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
 
     std::vector<std::thread> workers;
     workers.reserve(stream_count - 1);
-    for (uint32_t i = 1; i < stream_count; ++i) {
-        workers.emplace_back(worker_body, i);
+    try {
+        for (uint32_t i = 1; i < stream_count; ++i) {
+            workers.emplace_back(worker_body, i);
+        }
+    } catch (...) {
+        record_error(std::current_exception());
+        for (auto& worker : workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
     }
 
     try {
@@ -941,7 +1135,7 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
                             total_size,
                             main_chunk_manager,
                             transfer_monitor,
-                            make_progress_callback(),
+                            progress_callback_lambda,
                             false);
         }
     } catch (...) {
@@ -983,7 +1177,9 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
     // E2E Integrity check
     if (total_size > 0) {
         LOG_INFO("Performing E2E integrity check for: " + local_path);
-        auto local_hash = file::FileManager::compute_file_hash(local_path);
+        auto local_hash = file::FileManager::compute_file_hash(local_path, [&]() {
+            return cancel_requested_.load();
+        });
         
         protocol::FileVerifyRequest verify_req;
         verify_req.file_path = remote_path;
@@ -1101,50 +1297,6 @@ void Client::send_file_range(const std::string& file_path,
     
     std::map<uint64_t, size_t> in_flight_chunks;
     
-    // Background ACK listener thread
-    std::thread ack_thread([&]() {
-        try {
-            while (last_acknowledged_offset.load() < end_offset && !cancel_requested_ && !ack_thread_failed.load()) {
-                auto ack_msg = receive_message();
-                auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
-                if (!ack || !ack->success) {
-                    throw FileException("Transfer failed: " + (ack ? ack->error_message : "No acknowledgment"));
-                }
-                
-                uint64_t bytes_received = ack->bytes_received;
-                
-                std::lock_guard<std::mutex> lock(ack_mutex);
-                auto it = in_flight_chunks.begin();
-                while (it != in_flight_chunks.end() && it->first + it->second <= bytes_received) {
-                    uint64_t chunk_offset = it->first;
-                    size_t chunk_size = it->second;
-                    
-                    shared_bandwidth_monitor.record_bytes(chunk_size);
-                    shared_chunk_manager.update_chunk_size(shared_bandwidth_monitor, true, chunk_size);
-                    
-                    if (progress_delta_callback) {
-                        progress_delta_callback(chunk_size);
-                    }
-                    
-                    last_acknowledged_offset = chunk_offset + chunk_size;
-                    in_flight_bytes.fetch_sub(chunk_size);
-                    
-                    it = in_flight_chunks.erase(it);
-                }
-                
-                ack_cv.notify_all();
-            }
-        } catch (const std::exception& e) {
-            ack_thread_error = e.what();
-            ack_thread_failed = true;
-            ack_cv.notify_all();
-        } catch (...) {
-            ack_thread_error = "Unknown error in ACK listener thread";
-            ack_thread_failed = true;
-            ack_cv.notify_all();
-        }
-    });
-
     // Flow-control window: keep up to 64 MB in flight to allow pipelining.
     // The chunk size is capped to at most half this value so the wait
     // condition (in_flight + chunk_size <= window) is always reachable.
@@ -1156,65 +1308,126 @@ void Client::send_file_range(const std::string& file_path,
     std::atomic<bool> reader_failed(false);
     std::atomic<bool> is_skipped_error(false);
     std::string reader_error;
-    
-    std::thread reader_thread([&]() {
-        try {
-            file::FileStream file_stream;
-            if (!file_stream.open_read(file_path)) {
-                throw FileException("Failed to open source file for reading: " + file_path);
+
+    std::thread ack_thread;
+    std::thread reader_thread;
+
+    try {
+        // Background ACK listener thread
+        ack_thread = std::thread([&]() {
+            try {
+                while (last_acknowledged_offset.load() < end_offset && !cancel_requested_ && !ack_thread_failed.load()) {
+                    auto ack_msg = receive_message();
+                    auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
+                    if (!ack || !ack->success) {
+                        throw FileException("Transfer failed: " + (ack ? ack->error_message : "No acknowledgment"));
+                    }
+                    
+                    uint64_t bytes_received = ack->bytes_received;
+                    
+                    std::lock_guard<std::mutex> lock(ack_mutex);
+                    auto it = in_flight_chunks.begin();
+                    while (it != in_flight_chunks.end() && it->first + it->second <= bytes_received) {
+                        uint64_t chunk_offset = it->first;
+                        size_t chunk_size = it->second;
+                        
+                        shared_bandwidth_monitor.record_bytes(chunk_size);
+                        shared_chunk_manager.update_chunk_size(shared_bandwidth_monitor, true, chunk_size);
+                        
+                        if (progress_delta_callback) {
+                            progress_delta_callback(chunk_size);
+                        }
+                        
+                        last_acknowledged_offset = chunk_offset + chunk_size;
+                        in_flight_bytes.fetch_sub(chunk_size);
+                        
+                        it = in_flight_chunks.erase(it);
+                    }
+                    
+                    ack_cv.notify_all();
+                }
+            } catch (const std::exception& e) {
+                ack_thread_error = e.what();
+                ack_thread_failed = true;
+                ack_cv.notify_all();
+            } catch (...) {
+                ack_thread_error = "Unknown error in ACK listener thread";
+                ack_thread_failed = true;
+                ack_cv.notify_all();
             }
-            
-            uint64_t current_read_offset = start_offset;
-            while (current_read_offset < end_offset && !cancel_requested_ && !ack_thread_failed.load()) {
-                while (is_file_paused(file_path) && !is_file_skipped(file_path) && !cancel_requested_ && !ack_thread_failed.load()) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                }
-                if (is_file_skipped(file_path)) {
-                    throw FileSkippedException("File skip requested by client: " + file_path);
-                }
-                size_t chunk_size = shared_chunk_manager.get_optimal_chunk_size(shared_bandwidth_monitor);
-                // Cap chunk size so it always fits inside the flow-control window;
-                // without this cap the window condition can never become true → deadlock.
-                chunk_size = (std::min)(chunk_size, max_chunk_for_window);
-                chunk_size = static_cast<size_t>((std::min)(static_cast<uint64_t>(chunk_size), end_offset - current_read_offset));
-                
-                auto buffer = buffer_pool_->acquire();
-                buffer->resize(chunk_size);
-                
-                size_t bytes_read = file_stream.read(current_read_offset, buffer->data(), chunk_size);
-                if (bytes_read == 0) {
-                    buffer_pool_->release(std::move(buffer));
-                    throw FileException("Unexpected end of source file during read-ahead");
+        });
+
+        // Background disk read-ahead thread
+        reader_thread = std::thread([&]() {
+            try {
+                file::FileStream file_stream;
+                if (!file_stream.open_read(file_path)) {
+                    throw FileException("Failed to open source file for reading: " + file_path);
                 }
                 
-                if (bytes_read < chunk_size) {
-                    buffer->resize(bytes_read);
+                uint64_t current_read_offset = start_offset;
+                while (current_read_offset < end_offset && !cancel_requested_ && !ack_thread_failed.load()) {
+                    while (is_file_paused(file_path) && !is_file_skipped(file_path) && !cancel_requested_ && !ack_thread_failed.load()) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                    }
+                    if (is_file_skipped(file_path)) {
+                        throw FileSkippedException("File skip requested by client: " + file_path);
+                    }
+                    size_t chunk_size = shared_chunk_manager.get_optimal_chunk_size(shared_bandwidth_monitor);
+                    // Cap chunk size so it always fits inside the flow-control window;
+                    // without this cap the window condition can never become true → deadlock.
+                    chunk_size = (std::min)(chunk_size, max_chunk_for_window);
+                    chunk_size = static_cast<size_t>((std::min)(static_cast<uint64_t>(chunk_size), end_offset - current_read_offset));
+                    
+                    auto buffer = buffer_pool_->acquire();
+                    buffer->resize(chunk_size);
+                    
+                    size_t bytes_read = file_stream.read(current_read_offset, buffer->data(), chunk_size);
+                    if (bytes_read == 0) {
+                        buffer_pool_->release(std::move(buffer));
+                        throw FileException("Unexpected end of source file during read-ahead");
+                    }
+                    
+                    if (bytes_read < chunk_size) {
+                        buffer->resize(bytes_read);
+                    }
+                    
+                    ReadAheadChunk chunk;
+                    chunk.offset = current_read_offset;
+                    chunk.data = std::move(buffer);
+                    chunk.is_last = is_final_range && (current_read_offset + bytes_read >= end_offset);
+                    
+                    read_queue.push(std::move(chunk));
+                    current_read_offset += bytes_read;
                 }
-                
-                ReadAheadChunk chunk;
-                chunk.offset = current_read_offset;
-                chunk.data = std::move(buffer);
-                chunk.is_last = is_final_range && (current_read_offset + bytes_read >= end_offset);
-                
-                read_queue.push(std::move(chunk));
-                current_read_offset += bytes_read;
+                read_queue.set_finished();
+            } catch (const FileSkippedException& e) {
+                reader_error = e.what();
+                is_skipped_error = true;
+                reader_failed = true;
+                read_queue.set_finished();
+            } catch (const std::exception& e) {
+                reader_error = e.what();
+                reader_failed = true;
+                read_queue.set_finished();
+            } catch (...) {
+                reader_error = "Unknown error in read-ahead thread";
+                reader_failed = true;
+                read_queue.set_finished();
             }
-            read_queue.set_finished();
-        } catch (const FileSkippedException& e) {
-            reader_error = e.what();
-            is_skipped_error = true;
-            reader_failed = true;
-            read_queue.set_finished();
-        } catch (const std::exception& e) {
-            reader_error = e.what();
-            reader_failed = true;
-            read_queue.set_finished();
-        } catch (...) {
-            reader_error = "Unknown error in read-ahead thread";
-            reader_failed = true;
-            read_queue.set_finished();
+        });
+    } catch (...) {
+        cancel_requested_ = true;
+        ack_cv.notify_all();
+        read_queue.set_finished();
+        if (ack_thread.joinable()) {
+            ack_thread.join();
         }
-    });
+        if (reader_thread.joinable()) {
+            reader_thread.join();
+        }
+        throw;
+    }
 
     uint64_t bytes_sent = start_offset;
     
@@ -1295,17 +1508,29 @@ void Client::send_file_range(const std::string& file_path,
         // Wait for all in-flight packets to be acknowledged
         std::unique_lock<std::mutex> lock(ack_mutex);
         ack_cv.wait(lock, [&]() {
-            return in_flight_bytes.load() == 0 || ack_thread_failed.load();
+            return in_flight_bytes.load() == 0 || ack_thread_failed.load() || cancel_requested_.load();
         });
+
+        if (cancel_requested_) {
+            throw FileException("Transfer cancelled");
+        }
         
         if (ack_thread_failed.load()) {
             throw FileException("ACK thread failed during final flush: " + ack_thread_error);
         }
         
     } catch (...) {
-        // Shut down worker threads
+        // Signal all worker threads to stop before joining.
+        // Order matters: set cancel_requested_ FIRST so the reader thread's inner
+        // pause/skip spin-loop (which checks cancel_requested_) exits immediately,
+        // then wake the ack thread via the cv before calling set_finished() which
+        // unblocks any push() call stuck waiting for queue space.
         cancel_requested_ = true;
-        read_queue.set_finished();
+        if (async_socket_) {
+            async_socket_->disconnect();
+        }
+        ack_cv.notify_all();         // Wake the ack thread's wait
+        read_queue.set_finished();   // Unblock any reader thread stuck in push()
         if (reader_thread.joinable()) {
             reader_thread.join();
         }
@@ -1381,9 +1606,20 @@ void Client::set_error(const std::string& error) {
 
 void Client::request_cancel() {
     cancel_requested_ = true;
-    std::lock_guard<std::mutex> lock(workers_mutex_);
-    for (auto* worker : active_workers_) {
-        if (worker) {
+    // Close the socket so any thread blocked in receive_message()/execute_io_sync()
+    // gets an immediate network error instead of blocking forever.
+    if (async_socket_) {
+        async_socket_->disconnect();
+    }
+
+    std::vector<Client*> workers;
+    {
+        std::lock_guard<std::mutex> lock(workers_mutex_);
+        workers = active_workers_;
+    }
+
+    for (auto* worker : workers) {
+        if (worker && worker != this) {
             worker->request_cancel();
         }
     }
@@ -1413,171 +1649,207 @@ uint32_t Client::get_next_sequence_number() {
     return sequence_number_++;
 }
 
+void Client::trigger_webhook(const std::string& action, const std::string& source, const std::string& destination, const std::string& status, uint64_t bytes, const std::string& error_msg, uint32_t files_transferred) {
+    if (config_.webhook_url.empty()) {
+        return;
+    }
+    std::string url = config_.webhook_url;
+    std::string session_id = session_id_;
+    
+    std::string payload = "{";
+    payload += "\"session_id\":\"" + common::escape_json(session_id) + "\",";
+    payload += "\"action\":\"" + common::escape_json(action) + "\",";
+    payload += "\"status\":\"" + common::escape_json(status) + "\",";
+    payload += "\"source\":\"" + common::escape_json(source) + "\",";
+    payload += "\"destination\":\"" + common::escape_json(destination) + "\",";
+    payload += "\"files_transferred\":" + std::to_string(files_transferred) + ",";
+    payload += "\"total_bytes\":" + std::to_string(bytes) + ",";
+    payload += "\"error_message\":\"" + common::escape_json(error_msg) + "\"";
+    payload += "}";
+
+    std::thread([url, payload]() {
+        try {
+            common::send_http_post(url, payload);
+        } catch (...) {
+            // Ignore background webhook sending errors
+        }
+    }).detach();
+}
+
 void Client::download_file(const std::string& remote_path, const std::string& local_path, bool resume) {
-    if (!socket_) {
+    if (!async_socket_) {
         throw NetworkException("Socket is not connected");
     }
 
-    protocol::DownloadRequest request;
-    request.remote_path = remote_path;
-    
-    uint64_t resume_offset = 0;
-    if (resume && std::filesystem::exists(std::filesystem::u8path(local_path))) {
-        resume_offset = std::filesystem::file_size(std::filesystem::u8path(local_path));
-    }
-    request.resume_offset = resume_offset;
+    uint64_t total_bytes = 0;
+    uint64_t bytes_received = 0;
 
-    send_message(request);
-
-    auto response_msg = receive_message();
-    auto response = dynamic_cast<protocol::DownloadResponse*>(response_msg.get());
-    if (!response) {
-        throw ProtocolException("Expected DownloadResponse");
-    }
-    session_id_ = response->session_id;
-    if (parent_client_) {
-        std::lock_guard<std::mutex> lock(parent_client_->control_mutex_);
-        parent_client_->session_id_ = response->session_id;
-    }
-
-    if (!response->success) {
-        throw FileException("Download failed: " + response->error_message);
-    }
-
-    if (response->is_directory) {
-        file::FileManager::create_directories(local_path);
-        return;
-    }
-
-    if (response->is_symlink) {
-        // Receive the empty FileData chunk to align the connection state
-        auto msg = receive_message();
-        auto file_data = dynamic_cast<protocol::FileData*>(msg.get());
-        if (!file_data) {
-            throw ProtocolException("Expected FileData");
-        }
+    try {
+        protocol::DownloadRequest request;
+        request.remote_path = remote_path;
         
-        // Delete existing file/symlink if it exists to avoid conflicts
-        std::error_code ec;
-        if (std::filesystem::exists(local_path, ec) || std::filesystem::is_symlink(local_path, ec)) {
-            std::filesystem::remove(local_path, ec);
+        if (resume && std::filesystem::exists(std::filesystem::u8path(local_path))) {
+            bytes_received = std::filesystem::file_size(std::filesystem::u8path(local_path));
         }
-        
-        if (!file::FileManager::create_symlink(response->symlink_target, local_path)) {
+        request.resume_offset = bytes_received;
+
+        send_message(request);
+
+        auto response_msg = receive_message();
+        auto response = dynamic_cast<protocol::DownloadResponse*>(response_msg.get());
+        if (!response) {
+            throw ProtocolException("Expected DownloadResponse");
+        }
+        session_id_ = response->session_id;
+        if (parent_client_) {
+            std::lock_guard<std::mutex> lock(parent_client_->control_mutex_);
+            parent_client_->session_id_ = response->session_id;
+        }
+
+        if (!response->success) {
+            throw FileException("Download failed: " + response->error_message);
+        }
+
+        if (response->is_directory) {
+            file::FileManager::create_directories(local_path);
+            trigger_webhook("download", remote_path, local_path, "success", 0);
+            return;
+        }
+
+        if (response->is_symlink) {
+            // Receive the empty FileData chunk to align the connection state
+            auto msg = receive_message();
+            auto file_data = dynamic_cast<protocol::FileData*>(msg.get());
+            if (!file_data) {
+                throw ProtocolException("Expected FileData");
+            }
+            
+            // Delete existing file/symlink if it exists to avoid conflicts
+            std::error_code ec;
+            if (std::filesystem::exists(local_path, ec) || std::filesystem::is_symlink(local_path, ec)) {
+                std::filesystem::remove(local_path, ec);
+            }
+            
+            if (!file::FileManager::create_symlink(response->symlink_target, local_path)) {
+                protocol::FileAck ack;
+                ack.success = false;
+                ack.bytes_received = 0;
+                ack.error_message = "Failed to create symlink locally";
+                send_message(ack);
+                throw FileException("Failed to create symlink locally");
+            }
+            
+            if (!file::FileManager::is_symlink(local_path)) {
+                LOG_WARNING("Created placeholder file for symlink (privilege restrictions): " + local_path + " -> " + response->symlink_target);
+            } else {
+                LOG_DEBUG("Successfully created symlink: " + local_path + " -> " + response->symlink_target);
+            }
+            
+            if (response->permissions != 0) {
+                file::FileManager::set_permissions(local_path, response->permissions);
+            }
+            
+            // Send success ACK
             protocol::FileAck ack;
-            ack.success = false;
+            ack.success = true;
             ack.bytes_received = 0;
-            ack.error_message = "Failed to create symlink locally";
             send_message(ack);
-            throw FileException("Failed to create symlink locally");
+            trigger_webhook("download", remote_path, local_path, "success", 0);
+            return;
         }
-        
-        if (!file::FileManager::is_symlink(local_path)) {
-            LOG_WARNING("Created placeholder file for symlink (privilege restrictions): " + local_path + " -> " + response->symlink_target);
-        } else {
-            LOG_DEBUG("Successfully created symlink: " + local_path + " -> " + response->symlink_target);
+
+        if (is_file_skipped(remote_path)) {
+            throw FileSkippedException("File skip requested by client");
         }
-        
+
+        // Open local file
+        file::FileStream fs;
+        if (!fs.open_write(local_path, !resume)) {
+            throw FileException("Failed to open local file for writing: " + local_path);
+        }
+
+        total_bytes = response->file_size;
+
+        while (bytes_received < total_bytes) {
+            while (is_file_paused(remote_path) && !is_file_skipped(remote_path) && !cancel_requested_) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+
+            if (is_file_skipped(remote_path)) {
+                disconnect();
+                throw FileSkippedException("File skip requested by client");
+            }
+
+            auto msg = receive_message();
+            auto file_data = dynamic_cast<protocol::FileData*>(msg.get());
+            if (!file_data) {
+                throw ProtocolException("Expected FileData");
+            }
+
+            try {
+                fs.write(file_data->offset, file_data->data.data(), file_data->data.size());
+            } catch (const std::exception& e) {
+                protocol::FileAck ack;
+                ack.success = false;
+                ack.bytes_received = bytes_received;
+                ack.error_message = std::string("Disk write failed: ") + e.what();
+                send_message(ack);
+                throw FileException("Failed to write data to local file");
+            }
+
+            bytes_received += file_data->data.size();
+
+            // Send success ACK
+            protocol::FileAck ack;
+            ack.success = true;
+            ack.bytes_received = bytes_received;
+            send_message(ack);
+
+            if (progress_callback_) {
+                progress_callback_(bytes_received, total_bytes, remote_path);
+            }
+
+            if (file_data->is_last_chunk) {
+                break;
+            }
+        }
+        fs.close();
         if (response->permissions != 0) {
             file::FileManager::set_permissions(local_path, response->permissions);
         }
         
-        // Send success ACK
-        protocol::FileAck ack;
-        ack.success = true;
-        ack.bytes_received = 0;
-        send_message(ack);
-        return;
-    }
-
-    if (is_file_skipped(remote_path)) {
-        throw FileSkippedException("File skip requested by client");
-    }
-
-    // Open local file
-    file::FileStream fs;
-    if (!fs.open_write(local_path, !resume)) {
-        throw FileException("Failed to open local file for writing: " + local_path);
-    }
-
-    uint64_t total_bytes = response->file_size;
-    uint64_t bytes_received = resume_offset;
-
-    while (bytes_received < total_bytes) {
-        while (is_file_paused(remote_path) && !is_file_skipped(remote_path) && !cancel_requested_) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // E2E Integrity check for download
+        if (total_bytes > 0) {
+            LOG_INFO("Performing E2E integrity check for downloaded file: " + local_path);
+            auto local_hash = file::FileManager::compute_file_hash(local_path);
+            
+            protocol::FileVerifyRequest verify_req;
+            verify_req.file_path = remote_path;
+            verify_req.expected_hash = local_hash;
+            
+            send_message(verify_req);
+            
+            auto verify_resp_msg = receive_message();
+            auto verify_resp = dynamic_cast<protocol::FileVerifyResponse*>(verify_resp_msg.get());
+            if (!verify_resp) {
+                throw ProtocolException("Expected FileVerifyResponse");
+            }
+            
+            if (!verify_resp->success) {
+                throw FileException("Download integrity verification failed for " + local_path + ": " + verify_resp->error_message);
+            }
+            
+            LOG_INFO("Download E2E Integrity verification succeeded for: " + local_path);
         }
-
-        if (is_file_skipped(remote_path)) {
-            disconnect();
-            throw FileSkippedException("File skip requested by client");
-        }
-
-        auto msg = receive_message();
-        auto file_data = dynamic_cast<protocol::FileData*>(msg.get());
-        if (!file_data) {
-            throw ProtocolException("Expected FileData");
-        }
-
-        try {
-            fs.write(file_data->offset, file_data->data.data(), file_data->data.size());
-        } catch (const std::exception& e) {
-            protocol::FileAck ack;
-            ack.success = false;
-            ack.bytes_received = bytes_received;
-            ack.error_message = std::string("Disk write failed: ") + e.what();
-            send_message(ack);
-            throw FileException("Failed to write data to local file");
-        }
-
-        bytes_received += file_data->data.size();
-
-        // Send success ACK
-        protocol::FileAck ack;
-        ack.success = true;
-        ack.bytes_received = bytes_received;
-        send_message(ack);
-
-        if (progress_callback_) {
-            progress_callback_(bytes_received, total_bytes, remote_path);
-        }
-
-        if (file_data->is_last_chunk) {
-            break;
-        }
-    }
-    fs.close();
-    if (response->permissions != 0) {
-        file::FileManager::set_permissions(local_path, response->permissions);
-    }
-    
-    // E2E Integrity check for download
-    if (total_bytes > 0) {
-        LOG_INFO("Performing E2E integrity check for downloaded file: " + local_path);
-        auto local_hash = file::FileManager::compute_file_hash(local_path);
-        
-        protocol::FileVerifyRequest verify_req;
-        verify_req.file_path = remote_path;
-        verify_req.expected_hash = local_hash;
-        
-        send_message(verify_req);
-        
-        auto verify_resp_msg = receive_message();
-        auto verify_resp = dynamic_cast<protocol::FileVerifyResponse*>(verify_resp_msg.get());
-        if (!verify_resp) {
-            throw ProtocolException("Expected FileVerifyResponse");
-        }
-        
-        if (!verify_resp->success) {
-            throw FileException("Download integrity verification failed for " + local_path + ": " + verify_resp->error_message);
-        }
-        
-        LOG_INFO("Download E2E Integrity verification succeeded for: " + local_path);
+        trigger_webhook("download", remote_path, local_path, "success", total_bytes);
+    } catch (const std::exception& e) {
+        trigger_webhook("download", remote_path, local_path, "failed", bytes_received, e.what());
+        throw;
     }
 }
 
 std::vector<protocol::RemoteFileInfo> Client::list_remote_directory(const std::string& remote_path, bool recursive) {
-    if (!socket_) {
+    if (!async_socket_) {
         throw NetworkException("Socket is not connected");
     }
 
@@ -1600,66 +1872,76 @@ std::vector<protocol::RemoteFileInfo> Client::list_remote_directory(const std::s
 }
 
 void Client::download_directory(const std::string& remote_path, const std::string& local_path, bool recursive, bool resume) {
-    auto entries = list_remote_directory(remote_path, recursive);
-    
-    std::vector<std::pair<std::string, uint64_t>> files_to_report;
-    for (const auto& entry : entries) {
-        if (!entry.is_directory) {
-            files_to_report.push_back({entry.path, entry.size});
-        }
-    }
-    
-    if (file_list_callback_) {
-        file_list_callback_(files_to_report);
-    }
-    
-    // Normalize remote_path using filesystem path
-    std::filesystem::path p_remote = std::filesystem::u8path(remote_path).lexically_normal();
-    std::string norm_remote = p_remote.u8string();
-    while (!norm_remote.empty() && (norm_remote.back() == '/' || norm_remote.back() == '\\')) {
-        norm_remote.pop_back();
-    }
-    std::string norm_remote_cmp = norm_remote;
-#ifdef _WIN32
-    // Windows is case-insensitive
-    std::transform(norm_remote_cmp.begin(), norm_remote_cmp.end(), norm_remote_cmp.begin(), ::tolower);
-#endif
-
-    for (const auto& entry : entries) {
-        std::filesystem::path p_entry = std::filesystem::u8path(entry.path).lexically_normal();
-        std::string norm_entry = p_entry.u8string();
-        std::string norm_entry_cmp = norm_entry;
-#ifdef _WIN32
-        std::transform(norm_entry_cmp.begin(), norm_entry_cmp.end(), norm_entry_cmp.begin(), ::tolower);
-#endif
-
-        std::string rel_path = entry.path;
-        if (norm_entry_cmp.rfind(norm_remote_cmp, 0) == 0) {
-            rel_path = norm_entry.substr(norm_remote.length());
-        }
-        while (!rel_path.empty() && (rel_path[0] == '/' || rel_path[0] == '\\')) {
-            rel_path = rel_path.substr(1);
-        }
+    uint64_t total_bytes = 0;
+    uint32_t files_transferred = 0;
+    try {
+        auto entries = list_remote_directory(remote_path, recursive);
         
-        std::string full_local = file::FileManager::join_path(local_path, rel_path);
-        
-        if (entry.is_directory) {
-            file::FileManager::create_directories(full_local);
-        } else {
-            std::string parent_dir = file::FileManager::get_directory(full_local);
-            if (!parent_dir.empty()) {
-                file::FileManager::create_directories(parent_dir);
-            }
-            try {
-                download_file(entry.path, full_local, resume);
-            } catch (const FileSkippedException& e) {
-                LOG_INFO("File skipped: " + entry.path);
-                std::error_code ec;
-                std::filesystem::remove(full_local, ec);
-                disconnect();
-                connect(server_address_, server_port_);
+        std::vector<std::pair<std::string, uint64_t>> files_to_report;
+        for (const auto& entry : entries) {
+            if (!entry.is_directory) {
+                files_to_report.push_back({entry.path, entry.size});
+                total_bytes += entry.size;
+                files_transferred++;
             }
         }
+        
+        if (file_list_callback_) {
+            file_list_callback_(files_to_report);
+        }
+        
+        // Normalize remote_path using filesystem path
+        std::filesystem::path p_remote = std::filesystem::u8path(remote_path).lexically_normal();
+        std::string norm_remote = p_remote.u8string();
+        while (!norm_remote.empty() && (norm_remote.back() == '/' || norm_remote.back() == '\\')) {
+            norm_remote.pop_back();
+        }
+        std::string norm_remote_cmp = norm_remote;
+#ifdef _WIN32
+        // Windows is case-insensitive
+        std::transform(norm_remote_cmp.begin(), norm_remote_cmp.end(), norm_remote_cmp.begin(), ::tolower);
+#endif
+
+        for (const auto& entry : entries) {
+            std::filesystem::path p_entry = std::filesystem::u8path(entry.path).lexically_normal();
+            std::string norm_entry = p_entry.u8string();
+            std::string norm_entry_cmp = norm_entry;
+#ifdef _WIN32
+            std::transform(norm_entry_cmp.begin(), norm_entry_cmp.end(), norm_entry_cmp.begin(), ::tolower);
+#endif
+
+            std::string rel_path = entry.path;
+            if (norm_entry_cmp.rfind(norm_remote_cmp, 0) == 0) {
+                rel_path = norm_entry.substr(norm_remote.length());
+            }
+            while (!rel_path.empty() && (rel_path[0] == '/' || rel_path[0] == '\\')) {
+                rel_path = rel_path.substr(1);
+            }
+            
+            std::string full_local = file::FileManager::join_path(local_path, rel_path);
+            
+            if (entry.is_directory) {
+                file::FileManager::create_directories(full_local);
+            } else {
+                std::string parent_dir = file::FileManager::get_directory(full_local);
+                if (!parent_dir.empty()) {
+                    file::FileManager::create_directories(parent_dir);
+                }
+                try {
+                    download_file(entry.path, full_local, resume);
+                } catch (const FileSkippedException& e) {
+                    LOG_INFO("File skipped: " + entry.path);
+                    std::error_code ec;
+                    std::filesystem::remove(full_local, ec);
+                    disconnect();
+                    connect(server_address_, server_port_);
+                }
+            }
+        }
+        trigger_webhook("download", remote_path, local_path, "success", total_bytes, "", files_transferred);
+    } catch (const std::exception& e) {
+        trigger_webhook("download", remote_path, local_path, "failed", total_bytes, e.what(), files_transferred);
+        throw;
     }
 }
 
