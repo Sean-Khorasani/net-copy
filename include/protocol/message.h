@@ -118,6 +118,7 @@ public:
     bool is_symlink = false;
     std::string symlink_target;
     uint64_t file_size = 0;
+    uint64_t last_modified = 0;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
@@ -300,6 +301,7 @@ public:
     bool is_symlink = false;
     std::string symlink_target;
     std::string session_id;
+    uint64_t last_modified = 0;
     
     std::vector<uint8_t> serialize_payload() const override;
     void deserialize_payload(const std::vector<uint8_t>& data) override;
