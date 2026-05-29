@@ -42,7 +42,17 @@ void fast_memcpy(void* dest, const void* src, size_t n) {
     static CpuFeatures features = detect_cpu_features();
     if (static_cast<int>(features) & static_cast<int>(CpuFeatures::AVX2)) {
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_AMD64))
-        fast_memcpy_avx2_masm(dest, src, n);
+        // Use MSVC AVX2 intrinsics directly — equivalent to MASM version
+        const uint8_t* s = static_cast<const uint8_t*>(src);
+        uint8_t* d = static_cast<uint8_t*>(dest);
+        size_t i = 0;
+        for (; i + 32 <= n; i += 32) {
+            __m256i v = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(s + i));
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + i), v);
+        }
+        _mm256_zeroupper();
+        // Handle tail bytes
+        for (; i < n; ++i) d[i] = s[i];
         return;
 #elif (defined(__GNUC__) || defined(__clang__)) && defined(__x86_64__)
         fast_memcpy_avx2(dest, src, n);
@@ -56,7 +66,16 @@ void fast_memset(void* dest, int value, size_t n) {
     static CpuFeatures features = detect_cpu_features();
     if (static_cast<int>(features) & static_cast<int>(CpuFeatures::AVX2)) {
 #if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_AMD64))
-        fast_memset_avx2_masm(dest, value, n);
+        // Use MSVC AVX2 intrinsics directly — broadcast byte value to 32-byte ymm register
+        uint8_t* d = static_cast<uint8_t*>(dest);
+        __m256i v = _mm256_set1_epi8(static_cast<char>(value));
+        size_t i = 0;
+        for (; i + 32 <= n; i += 32) {
+            _mm256_storeu_si256(reinterpret_cast<__m256i*>(d + i), v);
+        }
+        _mm256_zeroupper();
+        // Handle tail bytes
+        for (; i < n; ++i) d[i] = static_cast<uint8_t>(value);
         return;
 #endif
     }
@@ -105,7 +124,7 @@ bool ArenaAllocator::owns(void* ptr) const {
     return ptr >= memory_ && ptr < memory_ + capacity_;
 }
 
-// PoolAllocator - Simple lock-free-ish free list (basic version)
+// PoolAllocator - Thread-safe pool allocator using mutex and vector
 PoolAllocator::PoolAllocator(size_t block_size, size_t num_blocks, size_t alignment)
     : block_size_(block_size), num_blocks_(num_blocks) {
     size_t total_size = block_size * num_blocks;
@@ -116,12 +135,10 @@ PoolAllocator::PoolAllocator(size_t block_size, size_t num_blocks, size_t alignm
 #endif
     if (!memory_) throw std::bad_alloc();
 
-    // Initialize free list
+    free_list_.reserve(num_blocks);
     for (size_t i = 0; i < num_blocks; ++i) {
         void* block = memory_ + i * block_size;
-        // Simple linked list using the memory itself
-        *reinterpret_cast<void**>(block) = free_list_head_.load(std::memory_order_relaxed);
-        free_list_head_.store(block, std::memory_order_relaxed);
+        free_list_.push_back(block);
     }
 }
 
@@ -135,22 +152,19 @@ PoolAllocator::~PoolAllocator() {
 }
 
 void* PoolAllocator::allocate() {
-    void* head = free_list_head_.load(std::memory_order_acquire);
-    while (head) {
-        void* next = *reinterpret_cast<void**>(head);
-        if (free_list_head_.compare_exchange_weak(head, next, std::memory_order_acq_rel)) {
-            return head;
-        }
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (free_list_.empty()) {
+        return nullptr;
     }
-    return nullptr; // Pool exhausted
+    void* ptr = free_list_.back();
+    free_list_.pop_back();
+    return ptr;
 }
 
 void PoolAllocator::deallocate(void* ptr) {
     if (!ptr) return;
-    void* head = free_list_head_.load(std::memory_order_relaxed);
-    do {
-        *reinterpret_cast<void**>(ptr) = head;
-    } while (!free_list_head_.compare_exchange_weak(head, ptr, std::memory_order_release));
+    std::lock_guard<std::mutex> lock(mutex_);
+    free_list_.push_back(ptr);
 }
 
 // FastMemoryResource
