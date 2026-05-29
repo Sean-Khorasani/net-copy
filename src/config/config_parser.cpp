@@ -174,6 +174,10 @@ bool ConfigParser::has_key(const std::string& section, const std::string& key) c
     return section_it->second.find(key) != section_it->second.end();
 }
 
+void ConfigParser::delete_section(const std::string& section) {
+    data_.erase(section);
+}
+
 std::vector<std::string> ConfigParser::get_sections() const {
     std::vector<std::string> sections;
     for (const auto& pair : data_) {
@@ -228,27 +232,66 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
     config.listen_port = static_cast<uint16_t>(parser.get_int("network", "listen_port", 1245));
     config.max_connections = parser.get_int("network", "max_connections", 10);
     config.timeout = parser.get_int("network", "timeout", 30);
+    config.udp = parser.get_bool("network", "udp", false);
+    config.socket_buffer_size = parser.get_int("network", "socket_buffer_size", 0);
     
-    config.secret_key = parser.get_string("security", "secret_key", "");
-    config.require_auth = parser.get_bool("security", "require_auth", true);
-    config.max_file_size = parser.get_uint64("security", "max_file_size", 0);
+    config.default_protocol = parser.get_string("protocol", "default_protocol", "internal");
     
+    // Protocol Internal
+    config.internal.enable = parser.get_bool("protocol.internal", "enable", true);
+    config.internal.secret_key = parser.get_string("protocol.internal", "secret_key", "");
+    config.internal.require_auth = parser.get_bool("protocol.internal", "require_auth", true);
+    config.internal.auth_method = parser.get_string("protocol.internal", "auth_method", "password");
+    config.internal.security_level = parser.get_string("protocol.internal", "security_level", "auto");
+    config.internal.users_file = parser.get_string("protocol.internal", "users_file", "users.csv");
+    config.internal.allow_anonymous = parser.get_bool("protocol.internal", "allow_anonymous", false);
+    
+    std::string max_chunk_str = parser.get_string("protocol.internal", "max_chunk_size", "adaptive");
+    if (max_chunk_str == "adaptive" || max_chunk_str == "automatic") {
+        config.internal.adaptive_chunk_size = true;
+        config.internal.max_chunk_size = 10485760;
+    } else {
+        config.internal.adaptive_chunk_size = false;
+        config.internal.max_chunk_size = static_cast<size_t>(std::stoull(max_chunk_str.empty() ? "10485760" : max_chunk_str));
+    }
+    
+    // Protocol TLS
+    config.tls.enable = parser.get_bool("protocol.tls", "enable", false);
+    config.tls.server_cert_file = parser.get_string("protocol.tls", "tls_server_cert_file", "");
+    config.tls.server_key_file = parser.get_string("protocol.tls", "tls_server_key_file", "");
+    config.tls.dh_file = parser.get_string("protocol.tls", "tls_dh_file", "");
+    config.tls.client_cert_validation = parser.get_bool("protocol.tls", "tls_client_cert_validation", false);
+    config.tls.client_chain_validation = parser.get_bool("protocol.tls", "tls_client_chain_validation", false);
+    config.tls.trusted_chain_file = parser.get_string("protocol.tls", "tls_trusted_chain_file", "");
+    
+    // Protocol SSH
+    config.ssh.enable = parser.get_bool("protocol.ssh", "enable", false);
+    config.ssh.port = static_cast<uint16_t>(parser.get_int("protocol.ssh", "port", 2222));
+    
+    // Protocol SFTP
+    config.sftp.enable = parser.get_bool("protocol.sftp", "enable", false);
+    
+    // Logging
+    config.logging.enable = parser.get_bool("logging", "enable", true);
+    config.logging.level = parser.get_string("logging", "log_level", "INFO");
+    config.logging.file = parser.get_string("logging", "log_file", "server.log");
+    config.logging.format = parser.get_string("logging", "log_format", "text");
+    config.logging.audit_file = parser.get_string("logging", "audit_file", "");
+    
+    // Console
+    config.console.enable = parser.get_bool("console_output", "enable", true);
+    config.console.level = parser.get_string("console_output", "level", "INFO");
+    
+    config.max_file_size = parser.get_uint64("performance", "max_file_size", 0);
     config.max_bandwidth_percent = parser.get_int("performance", "max_bandwidth_percent", 0);
-    config.max_chunk_size = static_cast<size_t>(parser.get_int("performance", "max_chunk_size", 10485760));
-    config.socket_buffer_size = parser.get_int("performance", "socket_buffer_size", 0);
     
-    config.log_level = parser.get_string("logging", "log_level", "INFO");
-    config.log_file = parser.get_string("logging", "log_file", "server.log");
-    config.log_format = parser.get_string("logging", "log_format", "text");
-    config.audit_log_file = parser.get_string("logging", "audit_log", "");
-    config.console_output = parser.get_bool("logging", "console_output", true);
+    config.webhook_url = parser.get_string("integration", "webhook_url", "");
     
     config.run_as_daemon = parser.get_bool("daemon", "run_as_daemon", false);
     config.pid_file = parser.get_string("daemon", "pid_file", "/var/run/net_copy_server.pid");
     
     config.allowed_paths = parser.get_string_list("paths", "allowed_paths", {"/var/lib/net_copy"});
     for (auto& p : config.allowed_paths) {
-        // Trim leading and trailing whitespace, single/double quotes
         size_t start = p.find_first_not_of(" \t\r\n\"'");
         size_t end = p.find_last_not_of(" \t\r\n\"'");
         if (start != std::string::npos && end != std::string::npos) {
@@ -260,9 +303,14 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
     }
     config.auto_create_directories = parser.get_bool("paths", "auto_create_directories", true);
     
-    // Auth settings
-    config.users_file      = parser.get_string("auth", "users_file", "users.csv");
-    config.allow_anonymous = parser.get_bool("auth", "allow_anonymous", false);
+    // Fallbacks for older config formats
+    if (!parser.has_key("protocol.internal", "secret_key") && parser.has_key("security", "secret_key")) {
+        config.internal.secret_key = parser.get_string("security", "secret_key", "");
+        config.internal.require_auth = parser.get_bool("security", "require_auth", true);
+        config.tls.enable = parser.get_bool("security", "tls", false);
+        config.tls.server_cert_file = parser.get_string("security", "tls_cert_file", "");
+        config.tls.server_key_file = parser.get_string("security", "tls_key_file", "");
+    }
     
     return config;
 }
@@ -273,30 +321,50 @@ ServerConfig ServerConfig::get_default() {
     config.listen_port = 1245;
     config.max_connections = 10;
     config.timeout = 30;
-    
-    config.secret_key = "";
-    config.require_auth = true;
-    config.max_file_size = 0;
-    
-    config.max_bandwidth_percent = 0;
-    config.max_chunk_size = 10485760;
+    config.udp = false;
     config.socket_buffer_size = 0;
     
-    config.log_level = "INFO";
-    config.log_file = "server.log";
-    config.log_format = "text";
-    config.audit_log_file = "";
-    config.console_output = true;
+    config.default_protocol = "internal";
     
+    config.internal.enable = true;
+    config.internal.secret_key = "";
+    config.internal.require_auth = true;
+    config.internal.auth_method = "password";
+    config.internal.security_level = "auto";
+    config.internal.users_file = "users.csv";
+    config.internal.allow_anonymous = false;
+    config.internal.max_chunk_size = 10485760;
+    config.internal.adaptive_chunk_size = true;
+    
+    config.tls.enable = false;
+    config.tls.server_cert_file = "";
+    config.tls.server_key_file = "";
+    config.tls.dh_file = "";
+    config.tls.client_cert_validation = false;
+    config.tls.client_chain_validation = false;
+    config.tls.trusted_chain_file = "";
+    
+    config.ssh.enable = false;
+    config.ssh.port = 2222;
+    
+    config.sftp.enable = false;
+    
+    config.logging.enable = true;
+    config.logging.level = "INFO";
+    config.logging.file = "server.log";
+    config.logging.format = "text";
+    config.logging.audit_file = "";
+    
+    config.console.enable = true;
+    config.console.level = "INFO";
+    
+    config.max_file_size = 0;
+    config.max_bandwidth_percent = 0;
+    config.webhook_url = "";
     config.run_as_daemon = false;
     config.pid_file = "/var/run/net_copy_server.pid";
-    
     config.allowed_paths = {"/var/lib/net_copy"};
     config.auto_create_directories = true;
-    
-    // Auth settings defaults
-    config.users_file      = "users.csv";
-    config.allow_anonymous = false;
     
     return config;
 }
@@ -307,74 +375,158 @@ ClientConfig ClientConfig::load_from_file(const std::string& filename) {
     parser.load_from_file(filename);
     
     ClientConfig config;
-    config.secret_key = parser.get_string("security", "secret_key", "");
+    config.timeout = parser.get_int("connection", "timeout", 30);
+    config.keep_alive = parser.get_bool("connection", "keep_alive", true);
+    config.udp = parser.get_bool("network", "udp", false);
+    config.socket_buffer_size = parser.get_int("network", "socket_buffer_size", 0);
     
+    config.default_protocol = parser.get_string("protocol", "default_protocol", "internal");
+    
+    // Protocol Internal
+    config.internal.enable = parser.get_bool("protocol.internal", "enable", true);
+    config.internal.secret_key = parser.get_string("protocol.internal", "secret_key", "");
+    config.internal.username = parser.get_string("protocol.internal", "username", "");
+    config.internal.password = parser.get_string("protocol.internal", "password", "");
+    config.internal.password_encrypted = parser.get_string("protocol.internal", "password_encrypted", "");
+    config.internal.auth_method = parser.get_string("protocol.internal", "auth_method", "none");
+    config.internal.security_level = parser.get_string("protocol.internal", "security_level", "HIGH");
+    config.internal.private_key_file = parser.get_string("protocol.internal", "private_key_file", "");
+    config.internal.private_key_passphrase = parser.get_string("protocol.internal", "private_key_passphrase", "");
+    config.internal.initial_chunk_size = static_cast<size_t>(parser.get_int("protocol.internal", "initial_chunk_size", 262144));
+    config.internal.min_chunk_size = static_cast<size_t>(parser.get_int("protocol.internal", "min_chunk_size", 8192));
+    std::string max_chunk_str = parser.get_string("protocol.internal", "max_chunk_size", "adaptive");
+    if (max_chunk_str == "adaptive" || max_chunk_str == "automatic") {
+        config.internal.max_chunk_size = 10485760;
+    } else {
+        config.internal.max_chunk_size = static_cast<size_t>(std::stoull(max_chunk_str.empty() ? "10485760" : max_chunk_str));
+    }
+    
+    config.internal.chunk_size_increase_factor = std::stod(parser.get_string("protocol.internal", "chunk_size_increase_factor", "1.1"));
+    config.internal.chunk_size_decrease_factor = std::stod(parser.get_string("protocol.internal", "chunk_size_decrease_factor", "0.5"));
+    
+    // Protocol TLS
+    config.tls.enable = parser.get_bool("protocol.tls", "enable", false);
+    config.tls.mutual_authentication = parser.get_bool("protocol.tls", "tls_mutual_authentication", false);
+    config.tls.client_cert_file = parser.get_string("protocol.tls", "tls_client_cert_file", "");
+    config.tls.client_key_file = parser.get_string("protocol.tls", "tls_client_key_file", "");
+    config.tls.server_cert_validation = parser.get_bool("protocol.tls", "tls_server_cert_validation", true);
+    config.tls.server_chain_validation = parser.get_bool("protocol.tls", "tls_server_chain_validation", true);
+    config.tls.trusted_chain_file = parser.get_string("protocol.tls", "tls_trusted_chain_file", "");
+    
+    // Protocol SSH
+    config.ssh.enable = parser.get_bool("protocol.ssh", "enable", false);
+    config.ssh.username = parser.get_string("protocol.ssh", "username", "");
+    config.ssh.private_key_file = parser.get_string("protocol.ssh", "private_key_file", "");
+    
+    // Protocol SFTP
+    config.sftp.enable = parser.get_bool("protocol.sftp", "enable", false);
+    
+    // Performance
     config.max_bandwidth_percent = parser.get_int("performance", "max_bandwidth_percent", 0);
     config.retry_attempts = parser.get_int("performance", "retry_attempts", 3);
     config.retry_delay = parser.get_int("performance", "retry_delay", 5);
-    config.initial_chunk_size = static_cast<size_t>(parser.get_int("performance", "initial_chunk_size", 262144));
-    config.min_chunk_size = static_cast<size_t>(parser.get_int("performance", "min_chunk_size", 8192));
-    config.max_chunk_size = static_cast<size_t>(parser.get_int("performance", "max_chunk_size", 10485760));
-    config.chunk_size_increase_factor = std::stod(parser.get_string("performance", "chunk_size_increase_factor", "1.1"));
-    config.chunk_size_decrease_factor = std::stod(parser.get_string("performance", "chunk_size_decrease_factor", "0.5"));
-    config.socket_buffer_size = parser.get_int("performance", "socket_buffer_size", 0);
     
-    config.log_level = parser.get_string("logging", "log_level", "INFO");
-    config.log_file = parser.get_string("logging", "log_file", "client.log");
-    config.log_format = parser.get_string("logging", "log_format", "text");
-    config.console_output = parser.get_bool("logging", "console_output", true);
+    // Logging
+    config.logging.enable = parser.get_bool("logging", "enable", true);
+    config.logging.level = parser.get_string("logging", "log_level", "INFO");
+    config.logging.file = parser.get_string("logging", "log_file", "client.log");
+    config.logging.format = parser.get_string("logging", "log_format", "text");
     
-    config.timeout = parser.get_int("connection", "timeout", 30);
-    config.keep_alive = parser.get_bool("connection", "keep_alive", true);
+    // Console
+    config.console.enable = parser.get_bool("console_output", "enable", true);
+    config.console.level = parser.get_string("console_output", "level", "INFO");
     
-    // Transfer settings
     config.create_empty_directories = parser.get_bool("transfer", "create_empty_directories", true);
     config.auto_create_directories = parser.get_bool("transfer", "auto_create_directories", true);
     
-    // Auth settings
-    config.username               = parser.get_string("auth", "username", "");
-    config.password               = parser.get_string("auth", "password", "");
-    config.password_encrypted     = parser.get_string("auth", "password_encrypted", "");
-    config.auth_method            = parser.get_string("auth", "auth_method", "none");
-    config.private_key_file       = parser.get_string("auth", "private_key_file", "");
-    config.private_key_passphrase = parser.get_string("auth", "private_key_passphrase", "");
+    config.proxy_type = parser.get_string("proxy", "type", "none");
+    config.proxy_host = parser.get_string("proxy", "host", "");
+    config.proxy_port = static_cast<uint16_t>(parser.get_int("proxy", "port", 0));
+    config.proxy_username = parser.get_string("proxy", "username", "");
+    config.proxy_password = parser.get_string("proxy", "password", "");
+    config.webhook_url = parser.get_string("integration", "webhook_url", "");
+    
+    // GUI settings
+    config.gui.port = static_cast<uint16_t>(parser.get_int("gui", "port", 1246));
+    config.gui.open_browser_on_start = parser.get_bool("gui", "open_browser_on_start", true);
+    config.gui.theme = parser.get_string("gui", "theme", "system");
+    config.gui.language = parser.get_string("gui", "language", "en");
+    
+    // Fallbacks for older config formats
+    if (!parser.has_key("protocol.internal", "secret_key") && parser.has_key("security", "secret_key")) {
+        config.internal.secret_key = parser.get_string("security", "secret_key", "");
+        config.tls.enable = parser.get_bool("security", "tls", false);
+        config.tls.server_cert_validation = parser.get_bool("security", "tls_verify", true);
+        config.tls.trusted_chain_file = parser.get_string("security", "tls_ca_file", "");
+        
+        config.internal.username = parser.get_string("auth", "username", "");
+        config.internal.password = parser.get_string("auth", "password", "");
+        config.internal.auth_method = parser.get_string("auth", "auth_method", "none");
+        config.internal.private_key_file = parser.get_string("auth", "private_key_file", "");
+    }
     
     return config;
 }
 
 ClientConfig ClientConfig::get_default() {
     ClientConfig config;
-    config.secret_key = "";
+    config.timeout = 30;
+    config.keep_alive = true;
+    config.udp = false;
+    config.socket_buffer_size = 0;
+    
+    config.default_protocol = "internal";
+    
+    config.internal.enable = true;
+    config.internal.secret_key = "";
+    config.internal.username = "";
+    config.internal.password = "";
+    config.internal.password_encrypted = "";
+    config.internal.auth_method = "none";
+    config.internal.security_level = "HIGH";
+    config.internal.private_key_file = "";
+    config.internal.private_key_passphrase = "";
+    config.internal.initial_chunk_size = 262144;
+    config.internal.min_chunk_size = 8192;
+    config.internal.max_chunk_size = 10485760;
+    config.internal.chunk_size_increase_factor = 1.1;
+    config.internal.chunk_size_decrease_factor = 0.5;
+    
+    config.tls.enable = false;
+    config.tls.mutual_authentication = false;
+    config.tls.client_cert_file = "";
+    config.tls.client_key_file = "";
+    config.tls.server_cert_validation = true;
+    config.tls.server_chain_validation = true;
+    config.tls.trusted_chain_file = "";
+    
+    config.ssh.enable = false;
+    config.ssh.username = "";
+    config.ssh.private_key_file = "";
+    
+    config.sftp.enable = false;
     
     config.max_bandwidth_percent = 0;
     config.retry_attempts = 3;
     config.retry_delay = 5;
-    config.initial_chunk_size = 262144;
-    config.min_chunk_size = 8192;
-    config.max_chunk_size = 10485760;
-    config.chunk_size_increase_factor = 1.1;
-    config.chunk_size_decrease_factor = 0.5;
-    config.socket_buffer_size = 0;
     
-    config.log_level = "INFO";
-    config.log_file = "client.log";
-    config.log_format = "text";
-    config.console_output = true;
+    config.logging.enable = true;
+    config.logging.level = "INFO";
+    config.logging.file = "client.log";
+    config.logging.format = "text";
     
-    config.timeout = 30;
-    config.keep_alive = true;
+    config.console.enable = true;
+    config.console.level = "INFO";
     
-    // Transfer settings defaults
-    config.create_empty_directories = true;  // Default to true
+    config.create_empty_directories = true;
     config.auto_create_directories = true;
     
-    // Auth settings defaults
-    config.username               = "";
-    config.password               = "";
-    config.password_encrypted     = "";
-    config.auth_method            = "none";
-    config.private_key_file       = "";
-    config.private_key_passphrase = "";
+    config.proxy_type = "none";
+    config.proxy_host = "";
+    config.proxy_port = 0;
+    config.proxy_username = "";
+    config.proxy_password = "";
+    config.webhook_url = "";
     
     return config;
 }
