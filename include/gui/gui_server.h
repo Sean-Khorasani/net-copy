@@ -8,6 +8,8 @@
 #include <memory>
 #include <condition_variable>
 #include "client/client.h"
+#include "network/event_loop.h"
+#include <asio.hpp>
 
 #include <unordered_map>
 #include <chrono>
@@ -51,7 +53,10 @@ struct ActiveTransfer {
     std::atomic<bool> cancelled{false};
 };
 
+class HttpConnection; // forward declaration
+
 class GuiServer {
+    friend class HttpConnection; // HttpConnection dispatches into private handlers
 public:
     GuiServer();
     ~GuiServer();
@@ -62,29 +67,34 @@ public:
     bool is_running() const { return running_; }
 
 private:
-    void listen_loop();
-    void handle_client(uint64_t client_socket);
-    void send_response(uint64_t client_socket, const std::string& status, const std::string& content_type, const std::string& body);
-    void send_error(uint64_t client_socket, int code, const std::string& message);
+    void do_accept();
+    void send_response(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& status, const std::string& content_type, const std::string& body);
+    void send_error(std::shared_ptr<asio::ip::tcp::socket> socket, int code, const std::string& message);
 
-    // API handlers
-    void handle_api_drives(uint64_t client_socket);
-    void handle_api_local_list(uint64_t client_socket, const std::string& query);
-    void handle_api_connect(uint64_t client_socket, const std::string& request_body);
-    void handle_api_remote_list(uint64_t client_socket, const std::string& query);
-    void handle_api_transfer(uint64_t client_socket, const std::string& request_body);
-    void handle_api_transfers(uint64_t client_socket);
-    void handle_api_transfer_status(uint64_t client_socket, const std::string& query);
-    void handle_api_transfer_abort(uint64_t client_socket, const std::string& request_body);
-    void handle_api_transfer_minimize(uint64_t client_socket, const std::string& request_body);
-    void handle_api_transfer_file_control(uint64_t client_socket, const std::string& request_body);
-    void handle_api_transfer_remove(uint64_t client_socket, const std::string& request_body);
-    void handle_api_transfer_control(uint64_t client_socket, const std::string& request_body);
-    void handle_api_transfer_server_session(uint64_t client_socket, const std::string& query);
-    void handle_api_remote_check(uint64_t client_socket);
-    void handle_api_disconnect(uint64_t client_socket);
-    void handle_api_local_create_dir(uint64_t client_socket, const std::string& query);
-    void handle_api_remote_create_dir(uint64_t client_socket, const std::string& query);
+    // API handlers — called by HttpConnection
+    void handle_api_drives(std::shared_ptr<asio::ip::tcp::socket> socket);
+    void handle_api_local_list(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& query);
+    void handle_api_connect(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_remote_list(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& query);
+    void handle_api_transfer(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_transfers(std::shared_ptr<asio::ip::tcp::socket> socket);
+    void handle_api_transfer_status(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& query);
+    void handle_api_transfer_abort(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_transfer_minimize(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_transfer_file_control(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_transfer_remove(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_transfer_control(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_transfer_server_session(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& query);
+    void handle_api_remote_check(std::shared_ptr<asio::ip::tcp::socket> socket);
+    void handle_api_disconnect(std::shared_ptr<asio::ip::tcp::socket> socket);
+    void handle_api_local_create_dir(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& query);
+    void handle_api_remote_create_dir(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& query);
+    void handle_api_profiles(std::shared_ptr<asio::ip::tcp::socket> socket);
+    void handle_api_profiles_save(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_profiles_delete(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_share_create(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& request_body);
+    void handle_api_share_list(std::shared_ptr<asio::ip::tcp::socket> socket);
+    void handle_shared_download(std::shared_ptr<asio::ip::tcp::socket> socket, const std::string& token);
 
     // Helper utilities
     std::string url_decode(const std::string& src);
@@ -94,8 +104,8 @@ private:
 
     uint16_t port_;
     std::atomic<bool> running_;
-    std::thread listen_thread_;
-    uint64_t listen_socket_;
+    std::unique_ptr<network::EventLoop> event_loop_;
+    std::unique_ptr<asio::ip::tcp::acceptor> acceptor_;
 
     // Connection state
     std::mutex client_mutex_;
@@ -121,6 +131,16 @@ private:
     std::mutex transfer_mutex_;
     std::mutex transfers_mutex_;
     std::unordered_map<std::string, std::shared_ptr<ActiveTransfer>> transfers_;
+
+    struct SharedLink {
+        std::string token;
+        std::string file_path;
+        uint64_t expires_at = 0;
+        int download_count = 0;
+        int max_downloads = 0;
+    };
+    std::mutex share_mutex_;
+    std::unordered_map<std::string, SharedLink> shared_links_;
 };
 
 } // namespace gui
