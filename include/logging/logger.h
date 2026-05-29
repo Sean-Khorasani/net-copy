@@ -20,6 +20,7 @@ public:
     static Logger& instance();
     
     void set_level(LogLevel level);
+    void set_console_level(LogLevel level);
     void set_file_output(const std::string& filename);
     void set_console_output(bool enable);
     void set_json_format(bool enable);
@@ -39,6 +40,7 @@ private:
     ~Logger() = default;
     
     LogLevel level_ = LogLevel::INFO;
+    LogLevel console_level_ = LogLevel::INFO;
     std::string log_file_;
     bool console_output_ = true;
     bool json_format_ = false;
