@@ -81,6 +81,7 @@ struct CommandLineArgs {
     bool recursive = false;
     bool resume = false;
     bool verbose = false;
+    std::string console_level = "INFO";
     bool help = false;
     bool download = false;
     uint16_t server_port = 0; // Added for client port
@@ -207,6 +208,20 @@ CommandLineArgs parse_arguments(const std::vector<std::string>& arg_list) {
             }
         } else if (arg == "-v" || arg == "--verbose") {
             args.verbose = true;
+            if (i + 1 < arg_list.size()) {
+                std::string next_arg = arg_list[i + 1];
+                std::string next_arg_upper = next_arg;
+                std::transform(next_arg_upper.begin(), next_arg_upper.end(), next_arg_upper.begin(), ::toupper);
+                if (next_arg_upper == "DEBUG" || next_arg_upper == "INFO" || next_arg_upper == "WARNING" || 
+                    next_arg_upper == "WARN" || next_arg_upper == "ERROR" || next_arg_upper == "CRITICAL") {
+                    args.console_level = next_arg_upper;
+                    i++; // Consume the log level argument
+                } else {
+                    args.console_level = "DEBUG";
+                }
+            } else {
+                args.console_level = "DEBUG";
+            }
         } else if (arg == "-g" || arg == "--get" || arg == "--download") {
             args.download = true;
         } else {
@@ -280,14 +295,7 @@ int client_main(int argc, char* argv[]) {
         
         // Override config with command line arguments
         auto config = client.get_config(); 
-        if (args.verbose) {
-            config.log_level = "DEBUG";
-            config.console_output = true;
-        } else {
-            // In non-verbose mode, minimize logging output
-            config.log_level = "ERROR"; // Only show errors
-            config.console_output = false; // Disable debug/info logs to console
-        }
+        // Note: verbose console level settings are processed in logger reconfiguration below
         
         // Override config with command line arguments only if specified
         if (args.empty_dirs_specified) {
@@ -312,7 +320,7 @@ int client_main(int argc, char* argv[]) {
         }
         
         // Prompt for secret key if not found in config
-        if (config.secret_key.empty()) {
+        if (config.internal.secret_key.empty()) {
             std::string password = netcopy::common::get_password_from_console("Enter master password: ");
             if (password.empty()) {
                 throw std::runtime_error("Password cannot be empty.");
@@ -330,7 +338,7 @@ int client_main(int argc, char* argv[]) {
             auto key = netcopy::crypto::ChaCha20Poly1305::derive_key(password, fixed_salt);
             
             // Convert to hex string format
-            config.secret_key = "0x" + netcopy::common::to_hex_string(
+            config.internal.secret_key = "0x" + netcopy::common::to_hex_string(
                 std::vector<uint8_t>(key.begin(), key.end()));
             
             if (args.verbose) {
@@ -339,8 +347,8 @@ int client_main(int argc, char* argv[]) {
         }
 
         // Decrypt password_encrypted if set and password is not already set
-        if (!config.password_encrypted.empty() && config.password.empty()) {
-            std::string master = config.private_key_passphrase;
+        if (!config.internal.password_encrypted.empty() && config.internal.password.empty()) {
+            std::string master = config.internal.private_key_passphrase;
             if (master.empty()) {
                 master = netcopy::common::get_password_from_console("Enter passphrase to decrypt stored password: ");
             }
@@ -350,7 +358,7 @@ int client_main(int argc, char* argv[]) {
             std::vector<uint8_t> aes_key(dk.begin(), dk.begin() + 32);
             std::vector<uint8_t> hmac_key(dk.begin() + 32, dk.end());
 
-            auto blob = netcopy::crypto::base64_decode(config.password_encrypted);
+            auto blob = netcopy::crypto::base64_decode(config.internal.password_encrypted);
             if (blob.size() > 32) {
                 std::vector<uint8_t> stored_mac(blob.begin(), blob.begin() + 32);
                 std::vector<uint8_t> ciphertext(blob.begin() + 32, blob.end());
@@ -367,7 +375,7 @@ int client_main(int argc, char* argv[]) {
                 
                 netcopy::crypto::AesCtr cipher(key_arr);
                 auto plaintext = cipher.process(ciphertext, iv_arr);
-                config.password = std::string(plaintext.begin(), plaintext.end());
+                config.internal.password = std::string(plaintext.begin(), plaintext.end());
             }
         }
 
@@ -375,11 +383,19 @@ int client_main(int argc, char* argv[]) {
         
         // Reconfigure logging with the updated settings
         auto& logger = netcopy::logging::Logger::instance();
-        logger.set_level(netcopy::logging::Logger::string_to_level(config.log_level));
-        logger.set_console_output(config.console_output);
-        logger.set_json_format(config.log_format == "json");
-        if (!config.log_file.empty()) {
-            logger.set_file_output(config.log_file);
+        logger.set_level(netcopy::logging::Logger::string_to_level(config.logging.level));
+        
+        if (args.verbose) {
+            logger.set_console_level(netcopy::logging::Logger::string_to_level(args.console_level));
+            logger.set_console_output(true);
+        } else {
+            logger.set_console_level(netcopy::logging::Logger::string_to_level(config.console.level));
+            logger.set_console_output(config.console.enable);
+        }
+        
+        logger.set_json_format(config.logging.format == "json");
+        if (!config.logging.file.empty()) {
+            logger.set_file_output(config.logging.file);
         }
         
         // Log configuration loaded message only in verbose mode (after logger is reconfigured)
