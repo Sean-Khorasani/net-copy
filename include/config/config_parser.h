@@ -38,6 +38,7 @@ public:
     
     // Check if key exists
     bool has_key(const std::string& section, const std::string& key) const;
+    void delete_section(const std::string& section);
     
     // Get all sections
     std::vector<std::string> get_sections() const;
@@ -59,23 +60,63 @@ struct ServerConfig {
     uint16_t listen_port;
     int max_connections;
     int timeout;
-    
-    // Security settings
-    std::string secret_key;
-    bool require_auth;
-    uint64_t max_file_size;
-    
-    // Performance settings
-    int max_bandwidth_percent;
-    size_t max_chunk_size;
+    bool udp;
     int socket_buffer_size;
     
+    // Protocol settings
+    std::string default_protocol;
+    
+    struct ProtocolInternal {
+        bool enable = true;
+        std::string secret_key;
+        bool require_auth = true;
+        std::string auth_method = "password";
+        std::string security_level = "auto";
+        std::string users_file = "users.csv";
+        bool allow_anonymous = false;
+        size_t max_chunk_size = 10485760;
+        bool adaptive_chunk_size = true;
+    } internal;
+    
+    struct ProtocolTls {
+        bool enable = false;
+        std::string server_cert_file;
+        std::string server_key_file;
+        std::string dh_file;
+        bool client_cert_validation = false;
+        bool client_chain_validation = false;
+        std::string trusted_chain_file;
+    } tls;
+    
+    struct ProtocolSsh {
+        bool enable = false;
+        uint16_t port = 2222;
+    } ssh;
+    
+    struct ProtocolSftp {
+        bool enable = false;
+    } sftp;
+    
     // Logging settings
-    std::string log_level;
-    std::string log_file;
-    std::string log_format;
-    std::string audit_log_file;
-    bool console_output;
+    struct Logging {
+        bool enable = true;
+        std::string level = "INFO";
+        std::string file = "server.log";
+        std::string format = "text";
+        std::string audit_file = "";
+    } logging;
+    
+    struct Console {
+        bool enable = true;
+        std::string level = "INFO";
+    } console;
+    
+    // Performance and Limits
+    uint64_t max_file_size;
+    int max_bandwidth_percent;
+    
+    // Integration
+    std::string webhook_url;
     
     // Daemon settings
     bool run_as_daemon;
@@ -85,51 +126,94 @@ struct ServerConfig {
     std::vector<std::string> allowed_paths;
     bool auto_create_directories;
     
-    // User auth settings
-    std::string users_file;       // path to users.csv (default: "users.csv")
-    bool allow_anonymous;         // allow connections with no username (default: false)
-    
     static ServerConfig load_from_file(const std::string& filename);
     static ServerConfig get_default();
 };
 
 // Client configuration structure
 struct ClientConfig {
-    // Security settings
-    std::string secret_key;
+    // Connection settings
+    int timeout;
+    bool keep_alive;
+    bool udp;
+    int socket_buffer_size;
+    
+    // Protocol settings
+    std::string default_protocol;
+    
+    struct ProtocolInternal {
+        bool enable = true;
+        std::string secret_key;
+        std::string username;
+        std::string password;
+        std::string password_encrypted;
+        std::string auth_method = "none";
+        std::string security_level = "HIGH";
+        std::string private_key_file;
+        std::string private_key_passphrase;
+        size_t initial_chunk_size = 262144;
+        size_t min_chunk_size = 8192;
+        size_t max_chunk_size = 10485760;
+        double chunk_size_increase_factor = 1.1;
+        double chunk_size_decrease_factor = 0.5;
+    } internal;
+    
+    struct ProtocolTls {
+        bool enable = false;
+        bool mutual_authentication = false;
+        std::string client_cert_file;
+        std::string client_key_file;
+        bool server_cert_validation = true;
+        bool server_chain_validation = true;
+        std::string trusted_chain_file;
+    } tls;
+    
+    struct ProtocolSsh {
+        bool enable = false;
+        std::string username;
+        std::string private_key_file;
+    } ssh;
+    
+    struct ProtocolSftp {
+        bool enable = false;
+    } sftp;
     
     // Performance settings
     int max_bandwidth_percent;
     int retry_attempts;
     int retry_delay;
-    size_t initial_chunk_size;
-    size_t min_chunk_size;
-    size_t max_chunk_size;
-    double chunk_size_increase_factor; // New: default to 1.1
-    double chunk_size_decrease_factor; // New: default to 0.5
-    int socket_buffer_size;
     
     // Logging settings
-    std::string log_level;
-    std::string log_file;
-    std::string log_format;
-    bool console_output;
+    struct Logging {
+        bool enable = true;
+        std::string level = "INFO";
+        std::string file = "client.log";
+        std::string format = "text";
+    } logging;
     
-    // Connection settings
-    int timeout;
-    bool keep_alive;
+    struct Console {
+        bool enable = true;
+        std::string level = "INFO";
+    } console;
     
     // Transfer settings
     bool create_empty_directories;
     bool auto_create_directories;
     
-    // Auth settings
-    std::string username;
-    std::string password;
-    std::string password_encrypted;
-    std::string auth_method;            // "none", "password", "mlkem"
-    std::string private_key_file;       // path to .pem ML-KEM private key
-    std::string private_key_passphrase; // passphrase to decrypt key file
+    // Proxy settings
+    std::string proxy_type = "none";
+    std::string proxy_host;
+    uint16_t proxy_port = 0;
+    std::string proxy_username;
+    std::string proxy_password;
+    std::string webhook_url;
+    
+    struct GuiSettings {
+        uint16_t port = 1246;
+        bool open_browser_on_start = true;
+        std::string theme = "system";
+        std::string language = "en";
+    } gui;
     
     static ClientConfig load_from_file(const std::string& filename);
     static ClientConfig get_default();
