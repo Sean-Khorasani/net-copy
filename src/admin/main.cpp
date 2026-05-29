@@ -415,21 +415,21 @@ static void cmd_verify(const std::map<std::string, std::string>& args) {
 
     netcopy::client::Client client;
     netcopy::config::ClientConfig config = netcopy::config::ClientConfig::get_default();
-    config.username = name;
-    config.console_output = false;
+    config.internal.username = name;
+    config.console.enable = false;
 
     if (args.count("pass")) {
-        config.password = args.at("pass");
-        config.auth_method = "password";
+        config.internal.password = args.at("pass");
+        config.internal.auth_method = "password";
     } else if (args.count("key")) {
-        config.private_key_file = args.at("key");
-        config.auth_method = "mlkem";
+        config.internal.private_key_file = args.at("key");
+        config.internal.auth_method = "mlkem";
         if (args.count("passphrase")) {
-            config.private_key_passphrase = args.at("passphrase");
+            config.internal.private_key_passphrase = args.at("passphrase");
         }
     } else {
-        config.password = prompt_password("Enter password for " + name + ": ");
-        config.auth_method = "password";
+        config.internal.password = prompt_password("Enter password for " + name + ": ");
+        config.internal.auth_method = "password";
     }
 
     client.set_config(config);
@@ -465,21 +465,21 @@ static void cmd_ls(const std::map<std::string, std::string>& args) {
 
     netcopy::client::Client client;
     netcopy::config::ClientConfig config = netcopy::config::ClientConfig::get_default();
-    config.username = name;
-    config.console_output = false;
+    config.internal.username = name;
+    config.console.enable = false;
 
     if (args.count("pass")) {
-        config.password = args.at("pass");
-        config.auth_method = "password";
+        config.internal.password = args.at("pass");
+        config.internal.auth_method = "password";
     } else if (args.count("key")) {
-        config.private_key_file = args.at("key");
-        config.auth_method = "mlkem";
+        config.internal.private_key_file = args.at("key");
+        config.internal.auth_method = "mlkem";
         if (args.count("passphrase")) {
-            config.private_key_passphrase = args.at("passphrase");
+            config.internal.private_key_passphrase = args.at("passphrase");
         }
     } else {
-        config.password = prompt_password("Enter password for " + name + ": ");
-        config.auth_method = "password";
+        config.internal.password = prompt_password("Enter password for " + name + ": ");
+        config.internal.auth_method = "password";
     }
 
     client.set_config(config);
