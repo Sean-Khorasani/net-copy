@@ -25,6 +25,9 @@ void print_usage(const char* program_name) {
     std::cout << "  -a, --access PATH          Directory allowed for file access" << std::endl;
     std::cout << "  -c, --config FILE          Use specified configuration file" << std::endl;
     std::cout << "  -d, --daemon               Run as daemon (background process)" << std::endl;
+    std::cout << "  --udp                      Use UDP (R-UDP) transport instead of TCP" << std::endl;
+    std::cout << "  --relay ADDRESS            Listen in relay mode OR connect to relay as a server (with --token)" << std::endl;
+    std::cout << "  --token TOKEN              Handshake token for relay connection" << std::endl;
 #ifdef _WIN32
     std::cout << "                             Note: On Windows, use 'start /B' for background execution" << std::endl;
 #endif
@@ -56,8 +59,12 @@ struct CommandLineArgs {
     bool auto_create_directories = true;
     bool auto_create_specified = false;
     bool verbose = false;
+    std::string console_level = "INFO";
     bool help = false;
     bool version = false;
+    bool udp = false;
+    std::string relay;
+    std::string token;
 };
 
 bool parse_listen_address(const std::string& listen_arg, std::string& address, uint16_t& port) {
@@ -160,6 +167,34 @@ CommandLineArgs parse_arguments(const std::vector<std::string>& arg_list) {
             args.auto_create_specified = true;
         } else if (arg == "-v" || arg == "--verbose") {
             args.verbose = true;
+            if (i + 1 < arg_list.size()) {
+                std::string next_arg = arg_list[i + 1];
+                std::string next_arg_upper = next_arg;
+                std::transform(next_arg_upper.begin(), next_arg_upper.end(), next_arg_upper.begin(), ::toupper);
+                if (next_arg_upper == "DEBUG" || next_arg_upper == "INFO" || next_arg_upper == "WARNING" || 
+                    next_arg_upper == "WARN" || next_arg_upper == "ERROR" || next_arg_upper == "CRITICAL") {
+                    args.console_level = next_arg_upper;
+                    i++; // Consume the log level argument
+                } else {
+                    args.console_level = "DEBUG";
+                }
+            } else {
+                args.console_level = "DEBUG";
+            }
+        } else if (arg == "--udp") {
+            args.udp = true;
+        } else if (arg == "--relay") {
+            if (i + 1 < arg_list.size()) {
+                args.relay = arg_list[++i];
+            } else {
+                throw std::runtime_error("Missing relay address argument");
+            }
+        } else if (arg == "--token") {
+            if (i + 1 < arg_list.size()) {
+                args.token = arg_list[++i];
+            } else {
+                throw std::runtime_error("Missing token argument");
+            }
         } else {
             throw std::runtime_error("Unknown argument: " + arg);
         }
@@ -233,24 +268,24 @@ int server_main(int argc, char* argv[]) {
             config.run_as_daemon = true;
 #ifdef _WIN32
             // On Windows GUI build, disable console output for daemon mode
-            config.console_output = false;
+            config.console.enable = false;
 #endif
         }
-        if (args.verbose) {
-            config.log_level = "DEBUG";
-            // Note: In daemon mode, verbose still disables console output
-        }
+        // Note: verbose console level settings are processed in logger reconfiguration below
         if (args.auto_create_specified) {
             config.auto_create_directories = args.auto_create_directories;
         }
+        if (args.udp) {
+            config.udp = true;
+        }
 
         // Prompt for secret key if not found in config
-        if (config.secret_key.empty()) {
+        if (config.internal.secret_key.empty()) {
             if (args.daemon || args.daemon_child) {
                 throw std::runtime_error("Secret key not found in configuration. Daemon mode requires secret_key in config file.");
             }
-            config.secret_key = netcopy::common::get_password_from_console("Enter secret key: ");
-            if (config.secret_key.empty()) {
+            config.internal.secret_key = netcopy::common::get_password_from_console("Enter secret key: ");
+            if (config.internal.secret_key.empty()) {
                 throw std::runtime_error("Secret key cannot be empty.");
             }
         }
@@ -259,14 +294,38 @@ int server_main(int argc, char* argv[]) {
         
         // Reconfigure logging after updating config (especially for daemon mode)
         auto& logger = netcopy::logging::Logger::instance();
-        logger.set_level(netcopy::logging::Logger::string_to_level(config.log_level));
-        logger.set_console_output(config.console_output);
-        if (!config.log_file.empty()) {
-            logger.set_file_output(config.log_file);
+        logger.set_level(netcopy::logging::Logger::string_to_level(config.logging.level));
+        
+        if (args.verbose) {
+            logger.set_console_level(netcopy::logging::Logger::string_to_level(args.console_level));
+            if (!config.run_as_daemon) {
+                logger.set_console_output(true);
+            } else {
+                logger.set_console_output(false);
+            }
+        } else {
+            logger.set_console_level(netcopy::logging::Logger::string_to_level(config.console.level));
+            logger.set_console_output(config.console.enable);
+        }
+        
+        if (!config.logging.file.empty()) {
+            logger.set_file_output(config.logging.file);
         }
         
         // Start server
-        if (args.daemon || args.daemon_child) {
+        if (!args.relay.empty()) {
+            if (args.daemon || args.daemon_child) {
+                netcopy::daemon::Daemon::setup_signal_handlers();
+                if (!config.pid_file.empty()) {
+                    netcopy::daemon::Daemon::create_pid_file(config.pid_file);
+                }
+            }
+            if (args.token.empty()) {
+                server.run_relay_server(args.relay);
+            } else {
+                server.run_relay_client(args.relay, args.token);
+            }
+        } else if (args.daemon || args.daemon_child) {
             server.run_as_daemon();
         } else {
             server.start();
