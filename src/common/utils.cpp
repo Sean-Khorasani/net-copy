@@ -1,4 +1,5 @@
 #include "common/utils.h"
+#include "network/socket.h"
 #include "crypto/sha3.h"
 #include <sstream>
 #include <iomanip>
@@ -388,6 +389,78 @@ std::vector<std::string> preprocess_arguments(int argc, char* argv[]) {
         }
     }
     return args;
+}
+
+bool send_http_post(const std::string& url, const std::string& json_payload) {
+    if (url.substr(0, 7) != "http://") {
+        return false;
+    }
+    
+    std::string host_port_path = url.substr(7);
+    size_t slash_pos = host_port_path.find('/');
+    std::string host_port = (slash_pos == std::string::npos) ? host_port_path : host_port_path.substr(0, slash_pos);
+    std::string path = (slash_pos == std::string::npos) ? "/" : host_port_path.substr(slash_pos);
+    
+    size_t colon_pos = host_port.find(':');
+    std::string host = (colon_pos == std::string::npos) ? host_port : host_port.substr(0, colon_pos);
+    uint16_t port = 80;
+    if (colon_pos != std::string::npos) {
+        try {
+            port = static_cast<uint16_t>(std::stoi(host_port.substr(colon_pos + 1)));
+        } catch (...) {
+            port = 80;
+        }
+    }
+    
+    try {
+        network::Socket sock;
+        sock.set_timeout(5); // 5 seconds timeout for webhook
+        sock.connect(host, port);
+        
+        std::string request = 
+            "POST " + path + " HTTP/1.1\r\n" +
+            "Host: " + host_port + "\r\n" +
+            "Content-Type: application/json\r\n" +
+            "Content-Length: " + std::to_string(json_payload.size()) + "\r\n" +
+            "Connection: close\r\n\r\n" +
+            json_payload;
+            
+        sock.send(request.data(), request.size());
+        
+        char response[1024];
+        size_t received = sock.receive(response, sizeof(response) - 1);
+        response[received] = '\0';
+        std::string resp_str(response);
+        if (resp_str.find("HTTP/1.1 200") != std::string::npos || 
+            resp_str.find("HTTP/1.1 201") != std::string::npos ||
+            resp_str.find("HTTP/1.1 204") != std::string::npos) {
+            return true;
+        }
+    } catch (...) {
+        return false;
+    }
+    return false;
+}
+
+std::string escape_json(const std::string& s) {
+    std::string out;
+    for (char c : s) {
+        if (c == '"') out += "\\\"";
+        else if (c == '\\') out += "\\\\";
+        else if (c == '\b') out += "\\b";
+        else if (c == '\f') out += "\\f";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else if (c == '\t') out += "\\t";
+        else if (static_cast<unsigned char>(c) < 32) {
+            char buf[16];
+            std::snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+            out += buf;
+        } else {
+            out += c;
+        }
+    }
+    return out;
 }
 
 } // namespace common
