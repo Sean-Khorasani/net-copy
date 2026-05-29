@@ -5,6 +5,10 @@
 #include <cstring>
 #include <algorithm>
 
+#if defined(__AVX2__) || defined(__x86_64__) || defined(_M_X64)
+#include <immintrin.h>
+#endif
+
 namespace netcopy {
 namespace crypto {
 
@@ -79,6 +83,27 @@ private:
         }
     }
     
+#if defined(__AVX2__)
+    static void quarter_round_avx2(__m256i& a, __m256i& b, __m256i& c, __m256i& d) {
+        // Assembly-level optimization using AVX2 intrinsics (SIMD parallel quarter rounds)
+        a = _mm256_add_epi32(a, b);
+        d = _mm256_xor_si256(d, a);
+        d = _mm256_or_si256(_mm256_slli_epi32(d, 16), _mm256_srli_epi32(d, 16));
+        
+        c = _mm256_add_epi32(c, d);
+        b = _mm256_xor_si256(b, c);
+        b = _mm256_or_si256(_mm256_slli_epi32(b, 12), _mm256_srli_epi32(b, 20));
+        
+        a = _mm256_add_epi32(a, b);
+        d = _mm256_xor_si256(d, a);
+        d = _mm256_or_si256(_mm256_slli_epi32(d, 8), _mm256_srli_epi32(d, 24));
+        
+        c = _mm256_add_epi32(c, d);
+        b = _mm256_xor_si256(b, c);
+        b = _mm256_or_si256(_mm256_slli_epi32(b, 7), _mm256_srli_epi32(b, 25));
+    }
+#endif
+
     static void quarter_round(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) {
         a += b; d ^= a; d = rotl(d, 16);
         c += d; b ^= c; b = rotl(b, 12);
