@@ -36,6 +36,9 @@ public:
     bool verify_response(const AuthChallengeData& challenge,
                          const std::vector<uint8_t>& client_proof);
 
+    // Direct password verification (e.g. for SSH/SFTP passwords)
+    bool verify_password(const std::string& username, const std::string& password) const;
+
 private:
     const UserDb& db_;
 };
