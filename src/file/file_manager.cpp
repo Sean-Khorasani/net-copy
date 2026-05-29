@@ -57,6 +57,17 @@ uint64_t FileManager::last_write_time(const std::string& path) {
     return std::chrono::duration_cast<std::chrono::seconds>(sctp.time_since_epoch()).count();
 }
 
+void FileManager::set_last_write_time(const std::string& path, uint64_t last_modified) {
+    std::error_code ec;
+    auto system_time = std::chrono::system_clock::time_point(std::chrono::seconds(last_modified));
+    auto file_time = std::chrono::time_point_cast<std::filesystem::file_time_type::duration>(
+        system_time - std::chrono::system_clock::now() + std::filesystem::file_time_type::clock::now());
+    std::filesystem::last_write_time(std::filesystem::u8path(path), file_time, ec);
+    if (ec) {
+        throw FileException("Failed to set last write time for " + path + ": " + ec.message());
+    }
+}
+
 bool FileManager::create_directories(const std::string& path) {
     std::error_code ec;
     return std::filesystem::create_directories(std::filesystem::u8path(path), ec);
@@ -455,7 +466,7 @@ std::vector<uint8_t> FileManager::read_file_chunk(const std::string& path, uint6
     return buffer;
 }
 
-std::vector<uint8_t> FileManager::compute_file_hash(const std::string& path) {
+std::vector<uint8_t> FileManager::compute_file_hash(const std::string& path, const std::function<bool()>& should_cancel) {
     if (!exists(path)) {
         throw FileException("File does not exist for hashing: " + path);
     }
@@ -472,6 +483,9 @@ std::vector<uint8_t> FileManager::compute_file_hash(const std::string& path) {
     std::vector<uint8_t> buffer(64 * 1024); // 64KB block size for hashing
     uint64_t offset = 0;
     while (true) {
+        if (should_cancel && should_cancel()) {
+            throw FileException("Hashing cancelled");
+        }
         size_t bytes_read = file.read(offset, buffer.data(), buffer.size());
         if (bytes_read == 0) {
             break;
@@ -479,11 +493,14 @@ std::vector<uint8_t> FileManager::compute_file_hash(const std::string& path) {
         hasher.update(buffer.data(), bytes_read);
         offset += bytes_read;
     }
+    if (should_cancel && should_cancel()) {
+        throw FileException("Hashing cancelled");
+    }
     file.close();
     return hasher.finalize();
 }
 
-std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std::string& path, uint64_t block_size) {
+std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std::string& path, uint64_t block_size, const std::function<bool()>& should_cancel) {
     if (!exists(path)) {
         throw FileException("File does not exist for block hashing: " + path);
     }
@@ -500,6 +517,9 @@ std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std:
     std::vector<uint8_t> buffer(block_size);
     uint64_t offset = 0;
     while (true) {
+        if (should_cancel && should_cancel()) {
+            throw FileException("Block hashing cancelled");
+        }
         size_t bytes_read = file.read(offset, buffer.data(), buffer.size());
         if (bytes_read == 0) {
             break;
@@ -514,6 +534,9 @@ std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std:
         hashes.push_back(std::move(bh));
         
         offset += bytes_read;
+    }
+    if (should_cancel && should_cancel()) {
+        throw FileException("Block hashing cancelled");
     }
     file.close();
     return hashes;
