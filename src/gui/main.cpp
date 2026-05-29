@@ -2,6 +2,8 @@
 #include "common/utils.h"
 #include "logging/logger.h"
 #include "common/fast_mem.h"
+#include "config/config_parser.h"
+#include "file/file_manager.h"
 #include <iostream>
 #include <string>
 #include <atomic>
@@ -58,6 +60,21 @@ int main(int argc, char* argv[]) {
     netcopy::logging::Logger::instance().set_file_output("net_copy_gui.log");
     netcopy::logging::Logger::instance().set_level(netcopy::logging::LogLevel::INFO);
     netcopy::logging::Logger::instance().set_console_output(false);
+    
+    // Load ClientConfig to get GUI settings
+    netcopy::config::ClientConfig config = netcopy::config::ClientConfig::get_default();
+    try {
+        std::string config_file = "client.conf";
+        if (!netcopy::file::FileManager::exists(config_file)) {
+            config_file = netcopy::common::get_default_config_path("client.conf");
+        }
+        if (netcopy::file::FileManager::exists(config_file)) {
+            config = netcopy::config::ClientConfig::load_from_file(config_file);
+            LOG_INFO("Loaded GUI configuration from " + config_file);
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Failed to load client.conf: " + std::string(e.what()));
+    }
 
     // 2. Set up OS shutdown handlers
 #ifdef _WIN32
@@ -73,7 +90,7 @@ int main(int argc, char* argv[]) {
 
     // 3. Initialize and start GuiServer
     netcopy::gui::GuiServer server;
-    uint16_t start_port = 1246;
+    uint16_t start_port = config.gui.port;
     if (!server.start(start_port)) {
         LOG_ERROR("Error: Could not start GUI server on port " + std::to_string(start_port) + " or fallbacks.");
         return 1;
@@ -81,19 +98,28 @@ int main(int argc, char* argv[]) {
 
     uint16_t port = server.get_port();
     std::string url = "http://localhost:" + std::to_string(port) + "/";
+    
+    if (config.gui.theme != "system" || config.gui.language != "en") {
+        url += "?theme=" + config.gui.theme + "&lang=" + config.gui.language;
+    }
+    
     LOG_INFO("GUI Server running at: " + url);
 
     // 4. Open browser
+    if (config.gui.open_browser_on_start) {
 #ifdef _WIN32
-    LOG_INFO("Opening system browser...");
-    HINSTANCE result = ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
-    if (reinterpret_cast<INT_PTR>(result) <= 32) {
-        LOG_ERROR("Warning: Failed to open system browser automatically (Error code " + std::to_string(reinterpret_cast<INT_PTR>(result)) + ").");
-        LOG_INFO("Please open the URL manually in your browser.");
-    }
+        LOG_INFO("Opening system browser...");
+        HINSTANCE result = ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
+        if (reinterpret_cast<INT_PTR>(result) <= 32) {
+            LOG_ERROR("Warning: Failed to open system browser automatically (Error code " + std::to_string(reinterpret_cast<INT_PTR>(result)) + ").");
+            LOG_INFO("Please open the URL manually in your browser.");
+        }
 #else
-    LOG_INFO("Please open the following link in your browser: " + url);
+        LOG_INFO("Please open the following link in your browser: " + url);
 #endif
+    } else {
+        LOG_INFO("Browser auto-open disabled. Please open the following link in your browser: " + url);
+    }
 
     LOG_INFO("Press Ctrl+C to exit and stop the server.");
 
