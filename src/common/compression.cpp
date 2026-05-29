@@ -27,7 +27,8 @@ bool is_compressible(const std::string& path) {
     static const std::vector<std::string> non_compressible = {
         ".jpg", ".jpeg", ".png", ".gif", ".mp3", ".mp4", ".avi",
         ".zip", ".gz", ".bz2", ".rar", ".7z", ".lz4", ".pdf",
-        ".mpg", ".mpeg", ".ogg", ".flac"
+        ".mpg", ".mpeg", ".ogg", ".flac", ".gguf", ".safetensors",
+        ".bin", ".pt", ".onnx", ".tar", ".tgz"
     };
     return !has_extension(path, non_compressible);
 }
