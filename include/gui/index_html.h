@@ -5,7 +5,10 @@
 namespace netcopy {
 namespace gui {
 
-inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html>
+inline std::string build_gui_html() {
+    std::string html;
+    html.reserve(130000);
+    html += R"rawhtml(<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -107,7 +110,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
         const SettingsIcon = () => (
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
         );
-)rawhtml") + std::string(R"rawhtml(        // Formatter utilities
+)rawhtml";
+    html += R"rawhtml(        // Formatter utilities
         const formatBytes = (bytes) => {
             if (bytes === 0 || bytes === "0") return '0 B';
             const k = 1024;
@@ -207,7 +211,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                 };
             }, [isDragging, dragStart, expanded]);
 
-            )rawhtml") + std::string(R"rawhtml(useEffect(() => {
+            )rawhtml";
+    html += R"rawhtml(useEffect(() => {
                 let intervalId;
                 const fetchDetails = async () => {
                     try {
@@ -461,7 +466,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                             </div>
                         )}
                     </div>
-)rawhtml") + std::string(R"rawhtml(
+)rawhtml";
+    html += R"rawhtml(
                     {/* Expandable Files List */}
                     {expanded && (
                         <div class="flex-1 overflow-y-auto border-t border-slate-850 bg-slate-950/40 divide-y divide-slate-850/60 p-2 max-h-48">
@@ -630,8 +636,10 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
             const [loadingSession, setLoadingSession] = useState(false);
             const [sessionError, setSessionError] = useState("");
 
-            // Create Folder Modal state
             const [createFolderConfig, setCreateFolderConfig] = useState({ show: false, type: 'local', parentPath: '', folderName: '' });
+
+            // Share Modal state
+            const [shareConfig, setShareConfig] = useState({ show: false, fileName: '', filePath: '', shareUrl: '', expirySeconds: 3600, maxDownloads: 0 });
 
             // Fetch local drives on load
             useEffect(() => {
@@ -688,7 +696,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                     addLog(`Failed to control transfer ${transferId}: ` + err.message, "ERROR");
                 }
             };
-)rawhtml") + std::string(R"rawhtml(
+)rawhtml";
+    html += R"rawhtml(
             const triggerCreateFolder = (type) => {
                 const parentPath = type === 'local' ? localPath : remotePath;
                 setCreateFolderConfig({
@@ -717,6 +726,48 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                 } catch (err) {
                     addLog(`Error creating ${type} folder: ${err.message}`, "ERROR");
                     alert(`Error creating folder: ${err.message}`);
+                }
+            };
+
+            const triggerShareLocal = (fileName) => {
+                let sep = localPath.includes('/') ? '/' : '\\';
+                let filePath = localPath;
+                if (!filePath.endsWith('/') && !filePath.endsWith('\\')) {
+                    filePath += sep;
+                }
+                filePath += fileName;
+                setShareConfig({
+                    show: true,
+                    fileName,
+                    filePath,
+                    shareUrl: '',
+                    expirySeconds: 3600,
+                    maxDownloads: 0
+                });
+            };
+
+            const generateShareLink = async () => {
+                try {
+                    const res = await fetch('/api/share/create', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            file_path: shareConfig.filePath,
+                            expiry_seconds: Number(shareConfig.expirySeconds),
+                            max_downloads: Number(shareConfig.maxDownloads)
+                        })
+                    });
+                    const data = await res.json();
+                    if (data.status === 'success') {
+                        setShareConfig(prev => ({ ...prev, shareUrl: data.share_url }));
+                        addLog(`Generated share link for: ${shareConfig.fileName}`);
+                    } else {
+                        addLog(`Failed to generate share link: ${data.error}`, "ERROR");
+                    }
+                } catch (err) {
+                    addLog(`Error generating share link: ${err.message}`, "ERROR");
                 }
             };
 
@@ -866,25 +917,34 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                     addLog("Failed to fetch local drives: " + err.message, "ERROR");
                 }
             };
-)rawhtml") + std::string(R"rawhtml(            const loadProfiles = () => {
-                const stored = localStorage.getItem('netcopy_profiles');
-                if (stored) {
-                    try {
-                        const parsed = JSON.parse(stored);
+)rawhtml";
+    html += R"rawhtml(            const loadProfiles = async () => {
+                try {
+                    const res = await fetch('/api/profiles');
+                    const parsed = await res.json();
+                    if (Array.isArray(parsed) && parsed.length > 0) {
                         setProfiles(parsed);
-                        if (parsed.length > 0) {
-                            applyProfile(parsed[0]);
+                        applyProfile(parsed[0]);
+                    } else {
+                        const stored = localStorage.getItem('netcopy_profiles');
+                        if (stored) {
+                            const parsedStored = JSON.parse(stored);
+                            setProfiles(parsedStored);
+                            if (parsedStored.length > 0) {
+                                applyProfile(parsedStored[0]);
+                            }
                         }
-                    } catch (e) {
-                        console.error(e);
                     }
+                } catch (e) {
+                    console.error(e);
                 }
             };
 
-            const saveProfile = () => {
+            const saveProfile = async () => {
                 if (!remoteHost) return;
+                const profileName = prompt("Enter a name for this profile:", remoteHost) || remoteHost;
                 const newProfile = {
-                    name: `${remoteUsername || 'anon'}@${remoteHost}:${remotePort}`,
+                    name: profileName,
                     host: remoteHost,
                     port: remotePort,
                     username: remoteUsername,
@@ -896,10 +956,43 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                     security_level: remoteSecurityLevel,
                     allowed_paths_input: remoteAllowedPathsInput
                 };
-                const updated = [newProfile, ...profiles.filter(p => p.name !== newProfile.name)].slice(0, 10);
-                setProfiles(updated);
-                localStorage.setItem('netcopy_profiles', JSON.stringify(updated));
-                addLog(`Saved connection profile: ${newProfile.name}`);
+
+                try {
+                    const res = await fetch('/api/profiles/save', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(newProfile)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        addLog(`Saved profile to client.conf: ${profileName}`);
+                        await loadProfiles();
+                    } else {
+                        addLog(`Failed to save profile: ${data.error}`, "ERROR");
+                    }
+                } catch (err) {
+                    addLog(`Error saving profile: ${err.message}`, "ERROR");
+                }
+            };
+
+            const deleteProfile = async (profileName) => {
+                if (!confirm(`Are you sure you want to delete profile "${profileName}"?`)) return;
+                try {
+                    const res = await fetch('/api/profiles/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ name: profileName })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        addLog(`Deleted profile: ${profileName}`);
+                        await loadProfiles();
+                    } else {
+                        addLog(`Failed to delete profile: ${data.error}`, "ERROR");
+                    }
+                } catch (err) {
+                    addLog(`Error deleting profile: ${err.message}`, "ERROR");
+                }
             };
 
             const applyProfile = (p) => {
@@ -962,7 +1055,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                             auth_method: remoteAuthMethod,
                             password: remotePassword,
                             private_key_file: remoteKeyFile,
-)rawhtml") + std::string(R"rawhtml(                            private_key_passphrase: remoteKeyPass,
+)rawhtml";
+    html += R"rawhtml(                            private_key_passphrase: remoteKeyPass,
                             secret_key: remoteSecretKey,
                             security_level: remoteSecurityLevel,
                             allowed_paths: remoteAllowedPathsInput
@@ -974,7 +1068,6 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                         setRemoteAllowedPaths(data.allowed_paths || []);
                         changeRemotePath(data.allowed_paths?.[0] || "/");
                         addLog(`Successfully connected to ${remoteHost}:${remotePort}! Allowed root: ${data.allowed_paths?.[0] || '/'}`);
-                        saveProfile();
                         setShowConnectModal(false);
                     } else {
                         addLog("Connection failed: " + data.error, "ERROR");
@@ -1035,7 +1128,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                     addLog("Transfer error: " + err.message, "ERROR");
                 }
             };
-)rawhtml") + std::string(R"rawhtml(            // Local Directory navigation
+)rawhtml";
+    html += R"rawhtml(            // Local Directory navigation
             const handleLocalDoubleClick = (file) => {
                 if (file.is_dir) {
                     if (file.name === '..') {
@@ -1171,7 +1265,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                             )}
                         </div>
                     </div>
-)rawhtml") + std::string(R"rawhtml(                    {/* Dual Panels Layout */}
+)rawhtml";
+    html += R"rawhtml(                    {/* Dual Panels Layout */}
                     <div class="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 min-h-0">
                         
                         {/* Left Pane - Local Directory Explorer */}
@@ -1206,32 +1301,42 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                             {/* Local Directory Table */}
                             <div class="flex-1 overflow-auto rounded-lg border border-slate-800 bg-slate-950/40">
                                 <table class="w-full text-sm text-left text-slate-300">
-                                    <thead class="sticky top-0 bg-slate-900 text-xs text-slate-400 uppercase tracking-wider border-b border-slate-800">
-                                        <tr>
-                                            <th class="p-3 w-8"><input type="checkbox" checked={localSortedFiles.length > 0 && localSelected.size === localSortedFiles.length} onChange={e => {
-                                                if (e.target.checked) setLocalSelected(new Set(localSortedFiles.map(f => f.name)));
-                                                else setLocalSelected(new Set());
-                                            }} class="rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500"/></th>
-                                            <th class="p-3 cursor-pointer" onClick={() => setLocalSort({ col: 'name', asc: !localSort.asc })}>Name</th>
-                                            <th class="p-3 cursor-pointer w-24" onClick={() => setLocalSort({ col: 'size', asc: !localSort.asc })}>Size</th>
-                                            <th class="p-3 cursor-pointer w-40" onClick={() => setLocalSort({ col: 'last_modified', asc: !localSort.asc })}>Modified</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-slate-850">
-                                        {localSortedFiles.map(file => (
-                                            <tr key={file.name} onDoubleClick={() => handleLocalDoubleClick(file)} class={`hover:bg-slate-800/40 transition cursor-pointer select-none ${localSelected.has(file.name) ? 'bg-blue-500/10' : ''}`} onClick={() => toggleSelectLocal(file.name)}>
-                                                <td class="p-3" onClick={e => e.stopPropagation()}>
-                                                    <input type="checkbox" checked={localSelected.has(file.name)} onChange={() => toggleSelectLocal(file.name)} class="rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500"/>
-                                                </td>
-                                                <td class="p-3 flex items-center font-medium max-w-[200px] truncate">
-                                                    {file.is_dir ? <FolderIcon /> : <FileIcon />}
-                                                    <span class="truncate">{file.name}</span>
-                                                </td>
-                                                <td class="p-3 text-slate-400 font-mono text-xs">{file.is_dir ? 'Folder' : formatBytes(file.size)}</td>
-                                                <td class="p-3 text-slate-400 text-xs">{formatDate(file.last_modified)}</td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
+                                            <thead class="sticky top-0 bg-slate-900 text-xs text-slate-400 uppercase tracking-wider border-b border-slate-800">
+                                                <tr>
+                                                    <th class="p-3 w-8"><input type="checkbox" checked={localSortedFiles.length > 0 && localSelected.size === localSortedFiles.length} onChange={e => {
+                                                        if (e.target.checked) setLocalSelected(new Set(localSortedFiles.map(f => f.name)));
+                                                        else setLocalSelected(new Set());
+                                                    }} class="rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500"/></th>
+                                                    <th class="p-3 cursor-pointer" onClick={() => setLocalSort({ col: 'name', asc: !localSort.asc })}>Name</th>
+                                                    <th class="p-3 cursor-pointer w-20" onClick={() => setLocalSort({ col: 'size', asc: !localSort.asc })}>Size</th>
+                                                    <th class="p-3 cursor-pointer w-32" onClick={() => setLocalSort({ col: 'last_modified', asc: !localSort.asc })}>Modified</th>
+                                                    <th class="p-3 w-16 text-right">Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody class="divide-y divide-slate-850">
+                                                {localSortedFiles.map(file => (
+                                                    <tr key={file.name} onDoubleClick={() => handleLocalDoubleClick(file)} class={`hover:bg-slate-800/40 transition cursor-pointer select-none ${localSelected.has(file.name) ? 'bg-blue-500/10' : ''}`} onClick={() => toggleSelectLocal(file.name)}>
+                                                        <td class="p-3" onClick={e => e.stopPropagation()}>
+                                                            <input type="checkbox" checked={localSelected.has(file.name)} onChange={() => toggleSelectLocal(file.name)} class="rounded bg-slate-900 border-slate-700 text-blue-500 focus:ring-blue-500"/>
+                                                        </td>
+                                                        <td class="p-3 flex items-center font-medium max-w-[200px] truncate">
+                                                            {file.is_dir ? <FolderIcon /> : <FileIcon />}
+                                                            <span class="truncate">{file.name}</span>
+                                                        </td>
+                                                        <td class="p-3 text-slate-400 font-mono text-xs">{file.is_dir ? 'Folder' : formatBytes(file.size)}</td>
+                                                        <td class="p-3 text-slate-400 text-xs">{formatDate(file.last_modified)}</td>
+                                                        <td class="p-3 text-right" onClick={e => e.stopPropagation()}>
+                                                            {!file.is_dir && (
+                                                                <button onClick={() => triggerShareLocal(file.name)} class="p-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 transition text-blue-400 hover:text-blue-300" title="Share file">
+                                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186l.932-.518a5.003 5.003 0 013.07-1.877m-4.002 2.395a4.993 4.993 0 000 2.186m0 0l.932.518a5.003 5.003 0 003.07 1.877m-3.07-1.877a2.25 2.25 0 114.12 1.323 2.25 2.25 0 01-4.12-1.323zm0-3.39a2.25 2.25 0 114.12-1.322 2.25 2.25 0 01-4.12 1.322z" />
+                                                                    </svg>
+                                                                </button>
+                                                            )}
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
                                 </table>
                             </div>
                             
@@ -1267,7 +1372,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                                                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                 </svg>
                                             </button>
-)rawhtml") + std::string(R"rawhtml(                                            <button onClick={() => fetchRemoteFiles(remotePath)} class="p-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 transition" title="Refresh">
+)rawhtml";
+    html += R"rawhtml(                                            <button onClick={() => fetchRemoteFiles(remotePath)} class="p-1.5 rounded-lg border border-slate-700 hover:bg-slate-800 transition" title="Refresh">
                                                 <RefreshIcon />
                                             </button>
                                         </div>
@@ -1330,7 +1436,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                         </div>
 
                     </div>
-)rawhtml") + std::string(R"rawhtml(                    {/* Console / Audit Log Drawer */}
+)rawhtml";
+    html += R"rawhtml(                    {/* Console / Audit Log Drawer */}
                     <div class="glass-panel rounded-xl flex flex-col h-40 p-4">
                         <div class="text-xs font-bold text-slate-400 mb-2 tracking-widest uppercase flex items-center justify-between">
                             <span>System & Transfer Audit Logs</span>
@@ -1363,14 +1470,20 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                                         <label class="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">Stored Profiles</label>
                                         <div class="flex flex-wrap gap-2">
                                             {profiles.map(p => (
-                                                <button key={p.name} onClick={() => applyProfile(p)} class="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 py-1 px-2.5 rounded-lg border border-slate-700 transition">
-                                                    {p.name}
-                                                </button>
+                                                <div key={p.name} class="inline-flex items-center bg-slate-800 rounded-lg border border-slate-700 transition text-xs text-slate-300 overflow-hidden">
+                                                    <button type="button" onClick={() => applyProfile(p)} class="hover:bg-slate-700 py-1 px-2.5 border-r border-slate-700 transition font-medium">
+                                                        {p.name}
+                                                    </button>
+                                                    <button type="button" onClick={() => deleteProfile(p.name)} class="hover:bg-red-900/40 text-slate-500 hover:text-red-400 py-1 px-2 transition font-bold" title="Delete Profile">
+                                                        &times;
+                                                    </button>
+                                                </div>
                                             ))}
                                         </div>
                                     </div>
                                 )}
-)rawhtml") + std::string(R"rawhtml(                                <form onSubmit={handleConnect} class="space-y-4">
+)rawhtml";
+    html += R"rawhtml(                                <form onSubmit={handleConnect} class="space-y-4">
                                     <div class="grid grid-cols-3 gap-3">
                                         <div class="col-span-2">
                                             <label class="block text-xs text-slate-400 mb-1">Server Address</label>
@@ -1441,6 +1554,7 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                                     </div>
 
                                     <div class="mt-6 flex justify-end space-x-3">
+                                        <button type="button" onClick={saveProfile} class="px-4 py-2 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-300 text-sm font-semibold transition">Save Profile</button>
                                         <button type="button" onClick={() => setShowConnectModal(false)} class="px-4 py-2 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-300 text-sm font-semibold transition">Cancel</button>
                                         <button type="submit" class="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold shadow-neon-blue transition">Establish Session</button>
                                     </div>
@@ -1467,7 +1581,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                     ))}
 
                     {/* Minimized Badges Row */}
-)rawhtml") + std::string(R"rawhtml(                        {transfers.some(t => t.minimized && !hiddenCards.has(t.id)) && (
+)rawhtml";
+    html += R"rawhtml(                        {transfers.some(t => t.minimized && !hiddenCards.has(t.id)) && (
                             <div class="flex flex-wrap justify-end gap-2 max-w-sm pointer-events-auto bg-slate-900/80 backdrop-blur-md p-2 rounded-xl border border-slate-800 shadow-xl">
                                 {transfers.filter(t => t.minimized && !hiddenCards.has(t.id)).map(transfer => {
                                     const percent = transfer.percent || 0;
@@ -1568,7 +1683,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                                 </div>
                             </div>
                         )}
-)rawhtml") + std::string(R"rawhtml(
+)rawhtml";
+    html += R"rawhtml(
                     {/* Server Session Info Modal */}
                     {showSessionModal && (
                         <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
@@ -1659,7 +1775,8 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                                         </div>
                                     </div>
                                 )}
-                                
+)rawhtml";
+    html += R"rawhtml(                                
                                 <div class="mt-4 flex justify-end">
                                     <button onClick={() => setShowSessionModal(false)} class="px-5 py-2 rounded-lg bg-slate-800 hover:bg-slate-755 text-slate-300 text-sm font-semibold border border-slate-700 transition">
                                         Close Details
@@ -1703,6 +1820,69 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
                             </div>
                         </div>
                     )}
+
+                    {/* Share Modal */}
+                    {shareConfig.show && (
+                        <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+                            <div class="glass-panel w-full max-w-md rounded-2xl p-6 shadow-2xl relative pointer-events-auto">
+                                <button onClick={() => setShareConfig(prev => ({ ...prev, show: false }))} class="absolute top-4 right-4 text-slate-400 hover:text-slate-200 transition">
+                                    <svg class="w-6 h-6" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                                
+                                <h3 class="text-lg font-bold text-slate-200 mb-4 flex items-center">
+                                    <svg class="w-5 h-5 text-blue-400 mr-2" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M8.684 10.742a3 3 0 110-2.282m0 0A2.25 2.25 0 0110.5 6h4.5a2.25 2.25 0 012.25 2.25v1.5a2.25 2.25 0 01-2.25 2.25H11.5c-.868 0-1.637-.491-2.008-1.218z"/>
+                                    </svg>
+                                    Share File
+                                </h3>
+
+                                <div class="space-y-4">
+                                    <div>
+                                        <label class="block text-xs text-slate-400 mb-1">File Name</label>
+                                        <span class="block text-xs font-mono text-slate-300 bg-slate-950/60 p-2 rounded border border-slate-800/80 truncate select-all">{shareConfig.fileName}</span>
+                                    </div>
+
+                                    {!shareConfig.shareUrl ? (
+                                        <React.Fragment>
+                                            <div>
+                                                <label class="block text-xs text-slate-400 mb-1">Expiration</label>
+                                                <select value={shareConfig.expirySeconds} onChange={e => setShareConfig(prev => ({ ...prev, expirySeconds: e.target.value }))} class="w-full glass-input rounded-lg py-2 px-3 text-sm text-slate-200">
+                                                    <option value={3600}>1 Hour</option>
+                                                    <option value={86400}>1 Day</option>
+                                                    <option value={604800}>1 Week</option>
+                                                    <option value={0}>Never Expire</option>
+                                                </select>
+                                            </div>
+
+                                            <div>
+                                                <label class="block text-xs text-slate-400 mb-1">Max Downloads (0 for unlimited)</label>
+                                                <input type="number" min="0" value={shareConfig.maxDownloads} onChange={e => setShareConfig(prev => ({ ...prev, maxDownloads: e.target.value }))} class="w-full glass-input rounded-lg py-2 px-3 text-sm text-slate-200 font-mono" />
+                                            </div>
+
+                                            <div class="flex justify-end space-x-3 pt-2">
+                                                <button onClick={() => setShareConfig(prev => ({ ...prev, show: false }))} class="px-4 py-2 rounded-lg border border-slate-700 hover:bg-slate-800 text-slate-350 text-sm font-semibold transition">Cancel</button>
+                                                <button onClick={generateShareLink} class="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold shadow-neon-blue transition">Generate Link</button>
+                                            </div>
+                                        </React.Fragment>
+                                    ) : (
+                                        <React.Fragment>
+                                            <div>
+                                                <label class="block text-xs text-slate-400 mb-1">Share URL</label>
+                                                <div class="flex space-x-2">
+                                                    <input type="text" readOnly value={shareConfig.shareUrl} class="flex-1 glass-input rounded-lg py-2 px-3 text-sm text-blue-400 font-mono" />
+                                                    <button onClick={() => { navigator.clipboard.writeText(shareConfig.shareUrl); addLog("Copied link to clipboard!", "INFO"); }} class="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-semibold transition">Copy</button>
+                                                </div>
+                                            </div>
+                                            
+                                            <div class="flex justify-end pt-2">
+                                                <button onClick={() => setShareConfig(prev => ({ ...prev, show: false }))} class="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold shadow-neon-blue transition">Done</button>
+                                            </div>
+                                        </React.Fragment>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </React.Fragment>
             );
         }
@@ -1711,7 +1891,11 @@ inline const std::string GUI_HTML_CONTENT = std::string(R"rawhtml(<!DOCTYPE html
         root.render(<App />);
     </script>
 </body>
-</html>)rawhtml");
+</html>)rawhtml";
+    return html;
+}
+
+inline const std::string GUI_HTML_CONTENT = build_gui_html();
 
 } // namespace gui
 } // namespace netcopy
