@@ -20,6 +20,7 @@
 #include <random>
 #include <unordered_map>
 #include <mutex>
+#include <thread>
 
 namespace netcopy {
 namespace server {
@@ -121,13 +122,13 @@ ConnectionHandler::ConnectionHandler(network::Socket client_socket,
     : client_socket_(std::move(client_socket)), config_(config), crypto_(crypto), 
       negotiated_security_level_(crypto::SecurityLevel::HIGH), sequence_number_(1), handshake_completed_(false),
       current_auto_create_(true), current_truncate_on_zero_(true), current_transfer_completed_(false),
-      negotiated_max_chunk_size_(config.max_chunk_size), current_is_symlink_(false), current_symlink_target_(""), current_permissions_(0), current_expected_file_size_(0) {
+      negotiated_max_chunk_size_(config.internal.max_chunk_size), current_is_symlink_(false), current_symlink_target_(""), current_permissions_(0), current_expected_file_size_(0), current_expected_last_modified_(0) {
     client_address_ = get_client_address();
     
     // Load user database
-    user_db_ = auth::UserDb::load(config_.users_file);
+    user_db_ = auth::UserDb::load(config_.internal.users_file);
     if (user_db_.is_loaded()) {
-        LOG_INFO("User database loaded from: " + config_.users_file + 
+        LOG_INFO("User database loaded from: " + config_.internal.users_file + 
                  " (" + std::to_string(user_db_.users().size()) + " users)");
     }
     
@@ -152,6 +153,14 @@ ConnectionHandler::~ConnectionHandler() {
 void ConnectionHandler::handle() {
     try {
         LOG_INFO("Handling connection from " + client_address_);
+        
+        if (config_.tls.enable) {
+            LOG_INFO("Enabling TLS server-side for " + client_address_);
+            client_socket_.enable_tls_server(config_.tls.server_cert_file, config_.tls.server_key_file, config_.tls.dh_file);
+            LOG_INFO("Performing TLS handshake for " + client_address_);
+            client_socket_.perform_tls_handshake();
+            LOG_INFO("TLS handshake completed successfully for " + client_address_);
+        }
         
         perform_handshake();
         
@@ -234,14 +243,29 @@ void ConnectionHandler::perform_handshake() {
     LOG_INFO("Handshake from client version: " + request->client_version);
     
     // Negotiate security level and maximum chunk size
-    negotiated_security_level_ = request->security_level;
+    crypto::SecurityLevel configured_level = crypto::SecurityLevel::HIGH;
+    bool enforce_level = false;
+    
+    std::string s_level = config_.internal.security_level;
+    std::transform(s_level.begin(), s_level.end(), s_level.begin(), ::toupper);
+    
+    if (s_level != "AUTO" && !s_level.empty()) {
+        enforce_level = true;
+        if (s_level == "FAST") configured_level = crypto::SecurityLevel::FAST;
+        else if (s_level == "AES" || s_level == "AES-CTR") configured_level = crypto::SecurityLevel::AES;
+        else if (s_level == "AES-GCM" || s_level == "AES_256_GCM") configured_level = crypto::SecurityLevel::AES_256_GCM;
+        else configured_level = crypto::SecurityLevel::HIGH;
+    }
+    
+    negotiated_security_level_ = enforce_level ? configured_level : request->security_level;
+    
     negotiated_max_chunk_size_ = request->max_chunk_size == 0
-        ? config_.max_chunk_size
-        : (std::min)(config_.max_chunk_size, static_cast<size_t>(request->max_chunk_size));
+        ? config_.internal.max_chunk_size
+        : (std::min)(config_.internal.max_chunk_size, static_cast<size_t>(request->max_chunk_size));
     
     // Create appropriate crypto engine
-    if (config_.require_auth && !config_.secret_key.empty()) {
-        crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, config_.secret_key);
+    if (config_.internal.require_auth && !config_.internal.secret_key.empty()) {
+        crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, config_.internal.secret_key);
         std::string level_name;
         switch (negotiated_security_level_) {
             case crypto::SecurityLevel::HIGH:
@@ -253,6 +277,9 @@ void ConnectionHandler::perform_handshake() {
             case crypto::SecurityLevel::AES:
                 level_name = "AES (AES-CTR with hardware acceleration)";
                 break;
+            case crypto::SecurityLevel::AES_256_GCM:
+                level_name = "AES_256_GCM (AES-256-GCM authenticated encryption)";
+                break;
         }
         LOG_INFO("Using security level: " + level_name);
     }
@@ -261,7 +288,7 @@ void ConnectionHandler::perform_handshake() {
     protocol::HandshakeResponse response;
     response.server_version = common::get_version_string();
     response.server_nonce = common::generate_random_bytes(16);
-    response.authentication_required = config_.require_auth;
+    response.authentication_required = config_.internal.require_auth;
     response.accepted_security_level = negotiated_security_level_;
     response.max_chunk_size = negotiated_max_chunk_size_;
     response.accepted_parallel_streams = request->requested_parallel_streams == 0 ? 1 : (std::min)(8u, request->requested_parallel_streams);
@@ -273,9 +300,9 @@ void ConnectionHandler::perform_handshake() {
     
     send_message(response);
     
-    if (crypto_engine_ && !config_.secret_key.empty()) {
+    if (crypto_engine_ && !config_.internal.secret_key.empty()) {
         auto derived = common::derive_session_key(
-            config_.secret_key,
+            config_.internal.secret_key,
             {},
             server_nonce_from_handshake_,
             client_nonce_from_handshake_);
@@ -286,7 +313,7 @@ void ConnectionHandler::perform_handshake() {
     
     // Auth phase
     bool auth_needed = false;
-    if (!config_.allow_anonymous) {
+    if (!config_.internal.allow_anonymous) {
         if (!user_db_.is_loaded()) {
             throw AuthException("Authentication required, but user database could not be loaded");
         }
@@ -295,7 +322,7 @@ void ConnectionHandler::perform_handshake() {
         }
         auth_needed = true;
     } else {
-        // config_.allow_anonymous is true
+        // config_.internal.allow_anonymous is true
         if (user_db_.is_loaded() && !request->username.empty()) {
             auth_needed = true;
         }
@@ -303,8 +330,18 @@ void ConnectionHandler::perform_handshake() {
 
     if (auth_needed) {
         auth::AuthMethod method = static_cast<auth::AuthMethod>(request->auth_method_id);
+        
+        std::string s_auth = config_.internal.auth_method;
+        std::transform(s_auth.begin(), s_auth.end(), s_auth.begin(), ::tolower);
+        
+        if (s_auth == "mlkem" && method != auth::AuthMethod::MLKEM) {
+            throw AuthException("Server strictly requires ML-KEM authentication");
+        } else if (s_auth == "password" && method != auth::AuthMethod::PASSWORD) {
+            throw AuthException("Server strictly requires password authentication");
+        }
+        
         if (method == auth::AuthMethod::NONE) {
-            if (!config_.allow_anonymous) {
+            if (!config_.internal.allow_anonymous) {
                 throw AuthException("Authentication required");
             }
         } else {
@@ -361,7 +398,7 @@ void ConnectionHandler::perform_handshake() {
             // Re-derive transport key mixing in the ML-KEM shared secret for forward secrecy
             if (method == auth::AuthMethod::MLKEM && crypto_engine_) {
                 auto derived = common::derive_session_key(
-                    config_.secret_key,
+                    config_.internal.secret_key,
                     challenge.kem_shared_secret,
                     server_nonce_from_handshake_,
                     client_nonce_from_handshake_);
@@ -421,6 +458,7 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         current_symlink_target_ = request.symlink_target;
         current_permissions_ = request.permissions;
         current_expected_file_size_ = request.file_size;
+        current_expected_last_modified_ = request.last_modified;
         
         // Check if this is a resume request
         if (request.resume_offset > 0) {
@@ -458,6 +496,7 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         response.success = false;
         response.error_message = e.what();
         LOG_ERROR("File request error: " + std::string(e.what()));
+        trigger_webhook("upload", request.source_path, request.destination_path, "failed", 0, e.what());
     }
     
     send_message(response);
@@ -586,6 +625,7 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
         ack.success = false;
         ack.error_message = e.what();
         LOG_ERROR("File data error: " + std::string(e.what()));
+        trigger_webhook("upload", current_session_ ? current_session_->source_path : "", current_file_path_, "failed", current_session_ ? current_session_->bytes_transferred.load() : 0, e.what());
     }
     
     send_message(ack);
@@ -612,10 +652,18 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
         if (current_permissions_ != 0 && !current_is_symlink_) {
             file::FileManager::set_permissions(current_file_path_, current_permissions_);
         }
+        if (current_expected_last_modified_ != 0 && !current_is_symlink_ && !is_marker_file) {
+            try {
+                file::FileManager::set_last_write_time(current_file_path_, current_expected_last_modified_);
+            } catch (const std::exception& e) {
+                LOG_ERROR("Failed to set last write time: " + std::string(e.what()));
+            }
+        }
         // Audit log the completed upload
         logging::AuditLog::instance().log_transfer(
             authenticated_user_, client_address_,
             current_file_path_, ack.bytes_received, 0.0, "", true);
+        trigger_webhook("upload", current_session_ ? current_session_->source_path : "", current_file_path_, "success", ack.bytes_received);
     }
 }
 
@@ -640,15 +688,31 @@ void ConnectionHandler::send_message(const protocol::Message& message) {
 
 std::unique_ptr<protocol::Message> ConnectionHandler::receive_message() {
     // Receive message length (network byte order)
-    uint32_t length_net;
-    client_socket_.receive(&length_net, sizeof(length_net));
+    uint32_t length_net = 0;
+    size_t length_received = 0;
+    uint8_t* length_ptr = reinterpret_cast<uint8_t*>(&length_net);
+    while (length_received < sizeof(length_net)) {
+        size_t received = client_socket_.receive(length_ptr + length_received, sizeof(length_net) - length_received);
+        if (received == 0) {
+            throw NetworkException("Connection closed while receiving message length");
+        }
+        length_received += received;
+    }
     uint32_t length = ntohl(length_net);
+    
+    // Safety check on length to avoid bad_alloc crash
+    if (length > 64 * 1024 * 1024) {
+        throw ProtocolException("Server received a message with length exceeding the 64MB limit: " + std::to_string(length) + " bytes");
+    }
     
     // Receive message data
     std::vector<uint8_t> data(length);
     size_t total_received = 0;
     while (total_received < length) {
         size_t received = client_socket_.receive(data.data() + total_received, length - total_received);
+        if (received == 0) {
+            throw NetworkException("Connection closed while receiving message data");
+        }
         total_received += received;
     }
     
@@ -764,23 +828,23 @@ void Server::load_config(const std::string& config_file) {
         
         // Initialize logging
         auto& logger = logging::Logger::instance();
-        logger.set_level(logging::Logger::string_to_level(config_.log_level));
-        logger.set_console_output(config_.console_output);
-        if (!config_.log_file.empty()) {
-            logger.set_file_output(config_.log_file);
+        logger.set_level(logging::Logger::string_to_level(config_.logging.level));
+        logger.set_console_output(config_.console.enable);
+        if (!config_.logging.file.empty()) {
+            logger.set_file_output(config_.logging.file);
         }
-        logger.set_json_format(config_.log_format == "json");
+        logger.set_json_format(config_.logging.format == "json");
         
         // Initialize audit log if configured
-        if (!config_.audit_log_file.empty()) {
-            logging::AuditLog::instance().set_path(config_.audit_log_file);
-            LOG_INFO("Audit log: " + config_.audit_log_file);
+        if (!config_.logging.audit_file.empty()) {
+            logging::AuditLog::instance().set_path(config_.logging.audit_file);
+            LOG_INFO("Audit log: " + config_.logging.audit_file);
         }
         
         // Initialize crypto if key is available
-        if (!config_.secret_key.empty()) {
+        if (!config_.internal.secret_key.empty()) {
             try {
-                std::string hex_key = config_.secret_key;
+                std::string hex_key = config_.internal.secret_key;
                 // Remove "0x" prefix if present
                 if (hex_key.length() > 2 && hex_key.substr(0, 2) == "0x") {
                     hex_key = hex_key.substr(2);
@@ -806,7 +870,7 @@ void Server::load_config(const std::string& config_file) {
         }
         
         LOG_INFO("Server configuration loaded from: " + config_file);
-        LOG_DEBUG("Config secret_key length: " + std::to_string(config_.secret_key.length()));
+        LOG_DEBUG("Config secret_key length: " + std::to_string(config_.internal.secret_key.length()));
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to load configuration: " + std::string(e.what()));
         throw;
@@ -825,20 +889,42 @@ void Server::start() {
     try {
         LOG_INFO("Starting NetCopy server...");
         
-        listen_socket_ = std::make_unique<network::Socket>();
+        event_loop_ = std::make_unique<network::EventLoop>(config_.max_connections > 0 ? (std::min)(64, config_.max_connections) : std::thread::hardware_concurrency());
+        event_loop_->start();
+        
+        asio::ip::tcp::endpoint endpoint(asio::ip::address::from_string(config_.listen_address.empty() ? "0.0.0.0" : config_.listen_address), config_.listen_port);
+        acceptor_ = std::make_unique<asio::ip::tcp::acceptor>(event_loop_->get_io_context());
+        
+        acceptor_->open(endpoint.protocol());
+        
 #ifdef _WIN32
         // On Windows, use exclusive address to prevent multiple servers on same port
-        listen_socket_->set_reuse_address(false);
+        acceptor_->set_option(asio::ip::tcp::acceptor::reuse_address(false));
 #else
         // On Unix, SO_REUSEADDR helps with quick restarts
-        listen_socket_->set_reuse_address(true);
+        acceptor_->set_option(asio::ip::tcp::acceptor::reuse_address(true));
 #endif
-        listen_socket_->bind(config_.listen_address, config_.listen_port);
-        listen_socket_->listen(config_.max_connections);
+
+        acceptor_->bind(endpoint);
+        acceptor_->listen(config_.max_connections > 0 ? config_.max_connections : asio::socket_base::max_listen_connections);
         
         running_ = true;
         
-        LOG_INFO("Securely listening on TCP port " + std::to_string(config_.listen_port));
+        // Load user database and initialize AuthEngine for the optional SSH server
+        user_db_ = auth::UserDb::load(config_.internal.users_file);
+        auth_engine_ = std::make_unique<auth::AuthEngine>(user_db_);
+        
+        // Start secondary SSH/SFTP/SCP server listener if enabled
+        if (config_.ssh.enable && !config_.tls.server_key_file.empty()) {
+            try {
+                ssh_server_ = std::make_unique<network::SshServer>(config_, *auth_engine_, config_.ssh.port);
+                ssh_server_->start();
+            } catch (const std::exception& e) {
+                LOG_WARNING("Failed to start optional secondary SSH server: " + std::string(e.what()));
+            }
+        }
+        
+        LOG_INFO("Securely listening on TCP port " + std::to_string(config_.listen_port) + " (async_accept)");
         
         // Log all allowed paths
         if (config_.allowed_paths.empty()) {
@@ -850,7 +936,11 @@ void Server::start() {
             }
         }
         
-        accept_connections();
+        do_accept();
+        
+        while (running_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
         
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to start server: " + std::string(e.what()));
@@ -862,11 +952,23 @@ void Server::stop() {
     if (running_) {
         running_ = false;
         
-        if (listen_socket_) {
-            listen_socket_->close();
+        if (ssh_server_) {
+            ssh_server_->stop();
+            ssh_server_.reset();
         }
         
-        cleanup_threads(true);
+        if (acceptor_) {
+            asio::error_code ec;
+            acceptor_->close(ec);
+            acceptor_.reset();
+        }
+        
+        if (event_loop_) {
+            event_loop_->stop();
+            event_loop_.reset();
+        }
+        
+        cleanup_threads(true); // Still clean up any remaining worker_threads if we had any
         
         LOG_INFO("Server stopped");
     }
@@ -888,30 +990,36 @@ void Server::run_as_daemon() {
     start();
 }
 
-void Server::accept_connections() {
-    while (running_) {
-        try {
-            auto client_socket = listen_socket_->accept();
+void Server::do_accept() {
+    auto socket = std::make_shared<asio::ip::tcp::socket>(event_loop_->get_io_context());
+    acceptor_->async_accept(*socket, [this, socket](const asio::error_code& ec) {
+        if (!running_) return;
+        
+        if (!ec) {
+            auto native_handle = socket->release();
+            network::Socket client_socket(static_cast<uint64_t>(native_handle));
             
+            // Spawn a DEDICATED thread per connection.
+            // ConnectionHandler::handle() runs a blocking synchronous recv() loop.
+            // Posting it into the ASIO io_context pool would starve the pool:
+            // with N concurrent streams all threads block on recv(), preventing
+            // async_accept from firing for new parallel-stream connections.
+            cleanup_threads();
             auto finished = std::make_shared<std::atomic<bool>>(false);
-            
-            // Create thread to handle client
-            std::thread t([this, client_socket = std::move(client_socket), finished]() mutable {
-                handle_client(std::move(client_socket));
+            std::thread t([this, client_sock = std::move(client_socket), finished]() mutable {
+                handle_client(std::move(client_sock));
                 finished->store(true);
             });
-            
-            worker_threads_.push_back({std::move(t), finished});
-            
-            // Clean up finished threads
-            cleanup_threads(false);
-            
-        } catch (const std::exception& e) {
-            if (running_) {
-                LOG_ERROR("Accept error: " + std::string(e.what()));
+            {
+                std::lock_guard<std::mutex> lock(worker_threads_mutex_);
+                worker_threads_.push_back({std::move(t), finished});
             }
+        } else {
+            LOG_ERROR("Accept error: " + ec.message());
         }
-    }
+        
+        do_accept();
+    });
 }
 
 void Server::handle_client(network::Socket client_socket) {
@@ -924,6 +1032,7 @@ void Server::handle_client(network::Socket client_socket) {
 }
 
 void Server::cleanup_threads(bool force_join_all) {
+    std::lock_guard<std::mutex> lock(worker_threads_mutex_);
     worker_threads_.erase(
         std::remove_if(worker_threads_.begin(), worker_threads_.end(),
                       [force_join_all](WorkerThread& wt) {
@@ -949,6 +1058,7 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
         resp.file_size = 0;
         resp.is_directory = false;
         send_message(resp);
+        trigger_webhook("download", resolved, request.remote_path, "failed", 0, resp.error_message);
         return;
     }
 
@@ -958,6 +1068,7 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
         resp.file_size = 0;
         resp.is_directory = false;
         send_message(resp);
+        trigger_webhook("download", resolved, request.remote_path, "failed", 0, resp.error_message);
         return;
     }
 
@@ -970,6 +1081,7 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
         resp.file_size = resp.is_directory ? 0 : file::FileManager::file_size(resolved);
     }
     resp.permissions = file::FileManager::get_permissions(resolved);
+    resp.last_modified = (resp.is_directory || resp.is_symlink) ? 0 : file::FileManager::last_write_time(resolved);
     resp.success = true;
 
     // Create session
@@ -994,6 +1106,7 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
                 std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
                 current_session_->logs.push_back("Failed to open file for reading.");
             }
+            trigger_webhook("download", resolved, request.remote_path, "failed", 0, "Failed to open file for reading.");
             return;
         }
         const size_t CHUNK = 4 * 1024 * 1024;
@@ -1079,11 +1192,14 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
                 ack_thread.join();
             }
             
-            if (ack_thread_failed.load() && current_session_) {
-                current_session_->is_active = false;
-                current_session_->status = "failed";
-                std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
-                current_session_->logs.push_back("Download failed: missing or invalid ACK from client.");
+            if (ack_thread_failed.load()) {
+                if (current_session_) {
+                    current_session_->is_active = false;
+                    current_session_->status = "failed";
+                    std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
+                    current_session_->logs.push_back("Download failed: missing or invalid ACK from client.");
+                }
+                trigger_webhook("download", resolved, request.remote_path, "failed", offset, "Download failed: missing or invalid ACK from client.");
             }
         }
         fs.close();
@@ -1096,6 +1212,7 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
                 std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
                 current_session_->logs.push_back("Download completed successfully.");
             }
+            trigger_webhook("download", resolved, request.remote_path, "success", offset);
         }
     } else if (resp.is_symlink) {
         // Send a single empty chunk to complete the flow
@@ -1117,6 +1234,7 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
                 std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
                 current_session_->logs.push_back("Download symlink failed: invalid ACK from client.");
             }
+            trigger_webhook("download", resolved, request.remote_path, "failed", 0, "Download symlink failed: invalid ACK from client.");
         } else {
             if (current_session_) {
                 current_session_->is_active = false;
@@ -1124,6 +1242,7 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
                 std::lock_guard<std::mutex> log_lock(current_session_->logs_mutex);
                 current_session_->logs.push_back("Download symlink completed successfully.");
             }
+            trigger_webhook("download", resolved, request.remote_path, "success", 0);
         }
         LOG_INFO("Download symlink completed: " + resolved);
     }
@@ -1148,18 +1267,23 @@ void ConnectionHandler::handle_list_request(const protocol::ListRequest& request
         return;
     }
 
-    resp.success = true;
-    auto entries = file::FileManager::list_directory(resolved, request.recursive);
-    for (const auto& e : entries) {
-        protocol::RemoteFileInfo info;
-        info.path = e.path;
-        info.size = e.size;
-        info.is_directory = e.is_directory;
-        info.last_modified = e.last_modified;
-        info.permissions = e.permissions;
-        info.is_symlink = e.is_symlink;
-        info.symlink_target = e.symlink_target;
-        resp.entries.push_back(std::move(info));
+    try {
+        auto entries = file::FileManager::list_directory(resolved, request.recursive);
+        resp.success = true;
+        for (const auto& e : entries) {
+            protocol::RemoteFileInfo info;
+            info.path = e.path;
+            info.size = e.size;
+            info.is_directory = e.is_directory;
+            info.last_modified = e.last_modified;
+            info.permissions = e.permissions;
+            info.is_symlink = e.is_symlink;
+            info.symlink_target = e.symlink_target;
+            resp.entries.push_back(std::move(info));
+        }
+    } catch (const std::exception& e) {
+        resp.success = false;
+        resp.error_message = e.what();
     }
     send_message(resp);
 }
@@ -1289,6 +1413,199 @@ void ConnectionHandler::handle_transfer_status_request(const protocol::TransferS
     response.logs = all_logs;
 
     send_message(response);
+}
+
+void ConnectionHandler::trigger_webhook(const std::string& action, const std::string& source, const std::string& destination, const std::string& status, uint64_t bytes, const std::string& error_msg, uint32_t files_transferred) {
+    if (config_.webhook_url.empty()) {
+        return;
+    }
+    std::string url = config_.webhook_url;
+    std::string session_id = current_session_ ? current_session_->session_id : "";
+    
+    std::string payload = "{";
+    payload += "\"session_id\":\"" + common::escape_json(session_id) + "\",";
+    payload += "\"action\":\"" + common::escape_json(action) + "\",";
+    payload += "\"status\":\"" + common::escape_json(status) + "\",";
+    payload += "\"source\":\"" + common::escape_json(source) + "\",";
+    payload += "\"destination\":\"" + common::escape_json(destination) + "\",";
+    payload += "\"files_transferred\":" + std::to_string(files_transferred) + ",";
+    payload += "\"total_bytes\":" + std::to_string(bytes) + ",";
+    payload += "\"error_message\":\"" + common::escape_json(error_msg) + "\"";
+    payload += "}";
+
+    std::thread([url, payload]() {
+        common::send_http_post(url, payload);
+    }).detach();
+}
+
+void Server::run_relay_client(const std::string& relay_address, const std::string& token) {
+    LOG_INFO("Starting server in relay-client mode connecting to: " + relay_address + " with token " + token);
+    running_ = true;
+    
+    std::string host;
+    uint16_t port = 1245;
+    size_t colon = relay_address.find(':');
+    if (colon != std::string::npos) {
+        host = relay_address.substr(0, colon);
+        port = static_cast<uint16_t>(std::stoi(relay_address.substr(colon + 1)));
+    } else {
+        host = relay_address;
+    }
+    
+    while (running_) {
+        try {
+            network::Socket relay_sock;
+            if (config_.udp) {
+                relay_sock.set_udp(true);
+            }
+            relay_sock.set_timeout(30); // 30s connection timeout
+            relay_sock.connect(host, port);
+            
+            // Send RELAY_REGISTER token
+            std::string reg_cmd = "RELAY_REGISTER " + token + "\n";
+            relay_sock.send(reg_cmd.data(), reg_cmd.size());
+            
+            // Wait for data (which indicates client paired/connected)
+            relay_sock.set_timeout(0); // Infinite read timeout
+            
+            // Create a worker thread to handle the client connection
+            auto finished = std::make_shared<std::atomic<bool>>(false);
+            std::thread t([this, sock = std::move(relay_sock), finished]() mutable {
+                handle_client(std::move(sock));
+                finished->store(true);
+            });
+            worker_threads_.push_back({std::move(t), finished});
+            
+            // Clean up completed worker threads to avoid resource leak
+            cleanup_threads(false);
+            
+            // Wait a tiny bit before establishing the next registration socket
+            // so we don't connect in an infinite tight loop if relay is down
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        } catch (const std::exception& e) {
+            LOG_ERROR("Relay connection error: " + std::string(e.what()) + ". Retrying in 5 seconds...");
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+        }
+    }
+}
+
+void Server::run_relay_server(const std::string& listen_address) {
+    LOG_INFO("Starting relay pairing server listening on: " + listen_address);
+    running_ = true;
+    
+    std::string host;
+    uint16_t port = 1245;
+    size_t colon = listen_address.find(':');
+    if (colon != std::string::npos) {
+        host = listen_address.substr(0, colon);
+        port = static_cast<uint16_t>(std::stoi(listen_address.substr(colon + 1)));
+    } else {
+        host = listen_address;
+    }
+    
+    network::Socket listen_sock;
+    if (config_.udp) {
+        listen_sock.set_udp(true);
+    }
+    listen_sock.bind(host, port);
+    listen_sock.listen(100);
+    
+    // We maintain paired connection states.
+    // Map of token -> Server Socket
+    std::mutex registry_mutex;
+    std::unordered_map<std::string, network::Socket> server_registry;
+    
+    auto bridge_sockets = [](network::Socket s1, network::Socket s2) {
+        // Use shared_ptr so Socket handles don't close prematurely
+        auto s1_shared = std::make_shared<network::Socket>(std::move(s1));
+        auto s2_shared = std::make_shared<network::Socket>(std::move(s2));
+        
+        // Run forwarding in two separate threads
+        auto fwd = [](std::shared_ptr<network::Socket> from, std::shared_ptr<network::Socket> to) {
+            std::vector<char> buffer(65536);
+            try {
+                while (true) {
+                    int bytes_read = from->receive(buffer.data(), static_cast<int>(buffer.size()));
+                    if (bytes_read <= 0) break;
+                    int bytes_sent = 0;
+                    while (bytes_sent < bytes_read) {
+                        int sent = to->send(buffer.data() + bytes_sent, static_cast<int>(bytes_read - bytes_sent));
+                        if (sent <= 0) break;
+                        bytes_sent += sent;
+                    }
+                    if (bytes_sent < bytes_read) break;
+                }
+            } catch (...) {}
+            from->close();
+            to->close();
+        };
+        
+        std::thread t1([s1_shared, s2_shared, fwd]() { fwd(s1_shared, s2_shared); });
+        std::thread t2([s2_shared, s1_shared, fwd]() { fwd(s2_shared, s1_shared); });
+        t1.detach();
+        t2.detach();
+    };
+    
+    while (running_) {
+        try {
+            network::Socket incoming = listen_sock.accept();
+            incoming.set_timeout(5); // 5s timeout to read registration header
+            
+            // Read first line
+            std::string header;
+            char ch;
+            while (incoming.receive(&ch, 1) == 1) {
+                if (ch == '\n') break;
+                header += ch;
+                if (header.size() > 1024) break; // sanity limit
+            }
+            
+            incoming.set_timeout(0); // reset timeout
+            
+            if (header.rfind("RELAY_REGISTER ", 0) == 0) {
+                std::string token = header.substr(15);
+                // Trim trailing \r if any
+                if (!token.empty() && token.back() == '\r') token.pop_back();
+                
+                LOG_INFO("Relay: Registered server for token '" + token + "'");
+                std::lock_guard<std::mutex> lock(registry_mutex);
+                // If there's an existing server socket, close it
+                auto it = server_registry.find(token);
+                if (it != server_registry.end()) {
+                    it->second.close();
+                }
+                server_registry[token] = std::move(incoming);
+            } else if (header.rfind("RELAY_CONNECT ", 0) == 0) {
+                std::string token = header.substr(14);
+                if (!token.empty() && token.back() == '\r') token.pop_back();
+                
+                network::Socket server_sock;
+                bool found = false;
+                {
+                    std::lock_guard<std::mutex> lock(registry_mutex);
+                    auto it = server_registry.find(token);
+                    if (it != server_registry.end()) {
+                        server_sock = std::move(it->second);
+                        server_registry.erase(it);
+                        found = true;
+                    }
+                }
+                
+                if (found) {
+                    LOG_INFO("Relay: Paired client and server for token '" + token + "'");
+                    bridge_sockets(std::move(server_sock), std::move(incoming));
+                } else {
+                    LOG_WARNING("Relay: Client requested token '" + token + "' but no server is registered");
+                    incoming.close();
+                }
+            } else {
+                LOG_WARNING("Relay: Invalid connection protocol: '" + header + "'");
+                incoming.close();
+            }
+        } catch (const std::exception& e) {
+            LOG_ERROR("Relay server accept loop error: " + std::string(e.what()));
+        }
+    }
 }
 
 } // namespace server
