@@ -42,6 +42,7 @@ private:
     std::string client_address_;
     std::string current_file_path_;  // Track the current file being transferred
     bool handshake_completed_;  // Track if handshake is done
+    bool transport_encryption_active_;
     bool current_auto_create_;
     bool current_truncate_on_zero_;
     bool current_transfer_completed_;
