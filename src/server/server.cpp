@@ -121,7 +121,7 @@ ConnectionHandler::ConnectionHandler(network::Socket client_socket,
                                    std::shared_ptr<crypto::ChaCha20Poly1305> crypto)
     : client_socket_(std::move(client_socket)), config_(config), crypto_(crypto), 
       negotiated_security_level_(crypto::SecurityLevel::HIGH), sequence_number_(1), handshake_completed_(false),
-      current_auto_create_(true), current_truncate_on_zero_(true), current_transfer_completed_(false),
+      transport_encryption_active_(false), current_auto_create_(true), current_truncate_on_zero_(true), current_transfer_completed_(false),
       negotiated_max_chunk_size_(config.internal.max_chunk_size), current_is_symlink_(false), current_symlink_target_(""), current_permissions_(0), current_expected_file_size_(0), current_expected_last_modified_(0) {
     client_address_ = get_client_address();
     
@@ -308,6 +308,7 @@ void ConnectionHandler::perform_handshake() {
             client_nonce_from_handshake_);
         std::string hex_derived = common::to_hex_string(derived);
         crypto_engine_ = crypto::create_crypto_engine(negotiated_security_level_, "0x" + hex_derived);
+        transport_encryption_active_ = true;
         LOG_DEBUG("Derived dynamic session key with nonces");
     }
     
@@ -670,7 +671,7 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
 void ConnectionHandler::send_message(const protocol::Message& message) {
     auto data = message.serialize();
     
-    if (handshake_completed_ && (crypto_engine_ || crypto_)) {
+    if (transport_encryption_active_ && (crypto_engine_ || crypto_)) {
         data = encrypt_message(data);
     }
     
@@ -716,7 +717,7 @@ std::unique_ptr<protocol::Message> ConnectionHandler::receive_message() {
         total_received += received;
     }
     
-    if (handshake_completed_ && (crypto_engine_ || crypto_)) {
+    if (transport_encryption_active_ && (crypto_engine_ || crypto_)) {
         data = decrypt_message(data);
     }
     
