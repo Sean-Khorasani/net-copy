@@ -1,3 +1,0 @@
-D:/src/net_copy/build_vs/_deps/liboqs-subbuild/CMakeFiles/liboqs-populate.dir
-D:/src/net_copy/build_vs/_deps/liboqs-subbuild/CMakeFiles/ALL_BUILD.dir
-D:/src/net_copy/build_vs/_deps/liboqs-subbuild/CMakeFiles/ZERO_CHECK.dir

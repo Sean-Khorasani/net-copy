@@ -1,7 +1,0 @@
-{
-	"InstallScripts" : 
-	[
-		"D:/src/net_copy/build_vs/_deps/liboqs-subbuild/cmake_install.cmake"
-	],
-	"Parallel" : false
-}

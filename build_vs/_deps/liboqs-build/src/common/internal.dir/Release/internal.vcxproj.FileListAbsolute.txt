@@ -1,1 +1,0 @@
-D:\src\net_copy\build_vs\_deps\liboqs-build\src\common\internal.dir\Release\internal.lib
