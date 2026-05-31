@@ -5,9 +5,17 @@
 #include <vector>
 #include <cstdint> // Added for uint64_t, uint16_t
 #include <unordered_map>
+#include "config/common_defaults.h"
+#include "config/server_defaults.h"
+#include "config/client_defaults.h"
 
 namespace netcopy {
 namespace config {
+
+struct ConfigValidationIssue {
+    int line = 0;
+    std::string message;
+};
 
 class ConfigParser {
 public:
@@ -46,6 +54,8 @@ public:
     // Get all keys in a section
     std::vector<std::string> get_keys(const std::string& section) const;
 
+    static std::string format_validation_issues(const std::vector<ConfigValidationIssue>& issues);
+
 private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> data_;
     
@@ -56,152 +66,154 @@ private:
 // Server configuration structure
 struct ServerConfig {
     // Network settings
-    std::string listen_address;
-    uint16_t listen_port;
-    int max_connections;
-    int timeout;
-    bool udp;
-    int socket_buffer_size;
+    std::string listen_address = defaults::kServerListenAddress;
+    uint16_t listen_port = defaults::kDefaultTransferPort;
+    int max_connections = defaults::kServerMaxConnections;
+    int timeout = defaults::kDefaultTimeoutSeconds;
+    bool udp = defaults::kServerUdpEnabled;
+    int socket_buffer_size = defaults::kDefaultSocketBufferSize;
     
     // Protocol settings
-    std::string default_protocol;
+    std::string default_protocol = defaults::kProtocolInternal;
     
     struct ProtocolInternal {
-        bool enable = true;
+        bool enable = defaults::kServerInternalEnabled;
         std::string secret_key;
-        bool require_auth = true;
-        std::string auth_method = "password";
-        std::string security_level = "auto";
-        std::string users_file = "users.csv";
-        bool allow_anonymous = false;
-        size_t max_chunk_size = 10485760;
-        bool adaptive_chunk_size = true;
+        bool require_auth = defaults::kServerRequireAuth;
+        std::string auth_method = defaults::kAuthPassword;
+        std::string security_level = defaults::kSecurityAuto;
+        std::string users_file = defaults::kServerUsersFile;
+        bool allow_anonymous = defaults::kServerAllowAnonymous;
+        size_t max_chunk_size = defaults::kMaxChunkSize;
+        bool adaptive_chunk_size = defaults::kServerAdaptiveChunkSize;
     } internal;
     
     struct ProtocolTls {
-        bool enable = false;
+        bool enable = defaults::kServerTlsEnabled;
         std::string server_cert_file;
         std::string server_key_file;
         std::string dh_file;
-        bool client_cert_validation = false;
-        bool client_chain_validation = false;
+        bool client_cert_validation = defaults::kServerTlsClientCertValidation;
+        bool client_chain_validation = defaults::kServerTlsClientChainValidation;
         std::string trusted_chain_file;
     } tls;
     
     struct ProtocolSsh {
-        bool enable = false;
-        uint16_t port = 2222;
+        bool enable = defaults::kServerSshEnabled;
+        uint16_t port = defaults::kServerSshPort;
     } ssh;
     
     struct ProtocolSftp {
-        bool enable = false;
+        bool enable = defaults::kServerSftpEnabled;
     } sftp;
     
     // Logging settings
     struct Logging {
-        bool enable = true;
-        std::string level = "INFO";
-        std::string file = "server.log";
-        std::string format = "text";
-        std::string audit_file = "";
+        bool enable = defaults::kServerLoggingEnabled;
+        std::string level = defaults::kLogLevelInfo;
+        std::string file = defaults::kServerLogFile;
+        std::string format = defaults::kLogFormatText;
+        std::string audit_file = defaults::kServerAuditFile;
     } logging;
     
     struct Console {
-        bool enable = true;
-        std::string level = "INFO";
+        bool enable = defaults::kServerConsoleEnabled;
+        std::string level = defaults::kLogLevelInfo;
     } console;
     
     // Performance and Limits
-    uint64_t max_file_size;
-    int max_bandwidth_percent;
+    uint64_t max_file_size = defaults::kUnlimitedFileSize;
+    int max_bandwidth_percent = defaults::kDefaultMaxBandwidthPercent;
     
     // Integration
     std::string webhook_url;
     
     // Daemon settings
-    bool run_as_daemon;
-    std::string pid_file;
+    bool run_as_daemon = defaults::kServerRunAsDaemon;
+    std::string pid_file = defaults::kServerPidFile;
     
     // Path settings
-    std::vector<std::string> allowed_paths;
-    bool auto_create_directories;
+    std::vector<std::string> allowed_paths = {defaults::kServerAllowedPath};
+    bool auto_create_directories = defaults::kServerAutoCreateDirectories;
     
     static ServerConfig load_from_file(const std::string& filename);
     static ServerConfig get_default();
+    static void create_default_file(const std::string& filename);
+    static std::vector<ConfigValidationIssue> validate_file(const std::string& filename);
 };
 
 // Client configuration structure
 struct ClientConfig {
     // Connection settings
-    int timeout;
-    bool keep_alive;
-    bool udp;
-    int socket_buffer_size;
+    int timeout = defaults::kDefaultTimeoutSeconds;
+    bool keep_alive = defaults::kClientKeepAlive;
+    bool udp = defaults::kClientUdpEnabled;
+    int socket_buffer_size = defaults::kDefaultSocketBufferSize;
     
     // Protocol settings
-    std::string default_protocol;
+    std::string default_protocol = defaults::kProtocolInternal;
     
     struct ProtocolInternal {
-        bool enable = true;
+        bool enable = defaults::kClientInternalEnabled;
         std::string secret_key;
         std::string username;
         std::string password;
         std::string password_encrypted;
-        std::string auth_method = "none";
-        std::string security_level = "HIGH";
+        std::string auth_method = defaults::kAuthNone;
+        std::string security_level = defaults::kSecurityHigh;
         std::string private_key_file;
         std::string private_key_passphrase;
-        size_t initial_chunk_size = 262144;
-        size_t min_chunk_size = 8192;
-        size_t max_chunk_size = 10485760;
-        double chunk_size_increase_factor = 1.1;
-        double chunk_size_decrease_factor = 0.5;
+        size_t initial_chunk_size = defaults::kInitialChunkSize;
+        size_t min_chunk_size = defaults::kMinChunkSize;
+        size_t max_chunk_size = defaults::kMaxChunkSize;
+        double chunk_size_increase_factor = defaults::kChunkSizeIncreaseFactor;
+        double chunk_size_decrease_factor = defaults::kChunkSizeDecreaseFactor;
     } internal;
     
     struct ProtocolTls {
-        bool enable = false;
-        bool mutual_authentication = false;
+        bool enable = defaults::kClientTlsEnabled;
+        bool mutual_authentication = defaults::kClientTlsMutualAuthentication;
         std::string client_cert_file;
         std::string client_key_file;
-        bool server_cert_validation = true;
-        bool server_chain_validation = true;
+        bool server_cert_validation = defaults::kClientTlsServerCertValidation;
+        bool server_chain_validation = defaults::kClientTlsServerChainValidation;
         std::string trusted_chain_file;
     } tls;
     
     struct ProtocolSsh {
-        bool enable = false;
+        bool enable = defaults::kClientSshEnabled;
         std::string username;
         std::string private_key_file;
     } ssh;
     
     struct ProtocolSftp {
-        bool enable = false;
+        bool enable = defaults::kClientSftpEnabled;
     } sftp;
     
     // Performance settings
-    int max_bandwidth_percent;
-    int retry_attempts;
-    int retry_delay;
+    int max_bandwidth_percent = defaults::kDefaultMaxBandwidthPercent;
+    int retry_attempts = defaults::kClientRetryAttempts;
+    int retry_delay = defaults::kClientRetryDelaySeconds;
     
     // Logging settings
     struct Logging {
-        bool enable = true;
-        std::string level = "INFO";
-        std::string file = "client.log";
-        std::string format = "text";
+        bool enable = defaults::kClientLoggingEnabled;
+        std::string level = defaults::kLogLevelInfo;
+        std::string file = defaults::kClientLogFile;
+        std::string format = defaults::kLogFormatText;
     } logging;
     
     struct Console {
-        bool enable = true;
-        std::string level = "INFO";
+        bool enable = defaults::kClientConsoleEnabled;
+        std::string level = defaults::kLogLevelInfo;
     } console;
     
     // Transfer settings
-    bool create_empty_directories;
-    bool auto_create_directories;
+    bool create_empty_directories = defaults::kCreateEmptyDirectories;
+    bool auto_create_directories = defaults::kAutoCreateDirectories;
     
     // Proxy settings
-    std::string proxy_type = "none";
+    std::string proxy_type = defaults::kProxyNone;
     std::string proxy_host;
     uint16_t proxy_port = 0;
     std::string proxy_username;
@@ -209,14 +221,16 @@ struct ClientConfig {
     std::string webhook_url;
     
     struct GuiSettings {
-        uint16_t port = 1246;
-        bool open_browser_on_start = true;
-        std::string theme = "system";
-        std::string language = "en";
+        uint16_t port = defaults::kGuiPort;
+        bool open_browser_on_start = defaults::kGuiOpenBrowserOnStart;
+        std::string theme = defaults::kGuiThemeSystem;
+        std::string language = defaults::kGuiLanguage;
     } gui;
     
     static ClientConfig load_from_file(const std::string& filename);
     static ClientConfig get_default();
+    static void create_default_file(const std::string& filename);
+    static std::vector<ConfigValidationIssue> validate_file(const std::string& filename);
 };
 
 } // namespace config
