@@ -152,6 +152,14 @@ std::vector<ConfigRule> server_rules() {
         {"protocol.internal", "users_file", ValueKind::String},
         {"protocol.internal", "allow_anonymous", ValueKind::Bool},
         {"protocol.internal", "max_chunk_size", ValueKind::ChunkSize, kMinChunkSize, kMaxFrameSize},
+        {"protocol.internal", "inflight_window_bytes", ValueKind::UInt64},
+        {"protocol.internal", "batch_bytes", ValueKind::UInt64},
+        {"protocol.internal", "batch_chunks", ValueKind::IntRange, 1, kMaxBatchChunks},
+        {"protocol.internal", "preallocate_files", ValueKind::Bool},
+        {"protocol.internal", "trusted_skip_zero_fill", ValueKind::Bool},
+        {"protocol.internal", "cache_hints", ValueKind::Bool},
+        {"protocol.internal", "streaming_verification", ValueKind::Bool},
+        {"protocol.internal", "tcp_info_window", ValueKind::Bool},
         {"protocol.tls", "enable", ValueKind::Bool},
         {"protocol.tls", "tls_server_cert_file", ValueKind::String},
         {"protocol.tls", "tls_server_key_file", ValueKind::String},
@@ -171,6 +179,14 @@ std::vector<ConfigRule> server_rules() {
         {"console_output", "level", ValueKind::Option, 0, 0, log_level_options()},
         {"performance", "max_file_size", ValueKind::UInt64},
         {"performance", "max_bandwidth_percent", ValueKind::IntRange, 0, kMaxPercent},
+        {"performance", "inflight_window_bytes", ValueKind::UInt64},
+        {"performance", "batch_bytes", ValueKind::UInt64},
+        {"performance", "batch_chunks", ValueKind::IntRange, 1, kMaxBatchChunks},
+        {"performance", "preallocate_files", ValueKind::Bool},
+        {"performance", "trusted_skip_zero_fill", ValueKind::Bool},
+        {"performance", "cache_hints", ValueKind::Bool},
+        {"performance", "streaming_verification", ValueKind::Bool},
+        {"performance", "tcp_info_window", ValueKind::Bool},
         {"integration", "webhook_url", ValueKind::String},
         {"daemon", "run_as_daemon", ValueKind::Bool},
         {"daemon", "pid_file", ValueKind::String},
@@ -206,6 +222,13 @@ std::vector<ConfigRule> client_rules() {
         {"protocol.internal", "max_chunk_size", ValueKind::ChunkSize, kMinChunkSize, kMaxFrameSize},
         {"protocol.internal", "chunk_size_increase_factor", ValueKind::DoubleRange, 1.0, 10.0},
         {"protocol.internal", "chunk_size_decrease_factor", ValueKind::DoubleRange, 0.01, 0.99},
+        {"protocol.internal", "inflight_window_bytes", ValueKind::UInt64},
+        {"protocol.internal", "batch_bytes", ValueKind::UInt64},
+        {"protocol.internal", "batch_chunks", ValueKind::IntRange, 1, kMaxBatchChunks},
+        {"protocol.internal", "preallocate_files", ValueKind::Bool},
+        {"protocol.internal", "cache_hints", ValueKind::Bool},
+        {"protocol.internal", "streaming_verification", ValueKind::Bool},
+        {"protocol.internal", "tcp_info_window", ValueKind::Bool},
         {"protocol.tls", "enable", ValueKind::Bool},
         {"protocol.tls", "tls_mutual_authentication", ValueKind::Bool},
         {"protocol.tls", "tls_client_cert_file", ValueKind::String},
@@ -220,6 +243,13 @@ std::vector<ConfigRule> client_rules() {
         {"performance", "max_bandwidth_percent", ValueKind::IntRange, 0, kMaxPercent},
         {"performance", "retry_attempts", ValueKind::IntRange, 0, kMaxRetryAttempts},
         {"performance", "retry_delay", ValueKind::IntRange, 0, kMaxTimeoutSeconds},
+        {"performance", "inflight_window_bytes", ValueKind::UInt64},
+        {"performance", "batch_bytes", ValueKind::UInt64},
+        {"performance", "batch_chunks", ValueKind::IntRange, 1, kMaxBatchChunks},
+        {"performance", "preallocate_files", ValueKind::Bool},
+        {"performance", "cache_hints", ValueKind::Bool},
+        {"performance", "streaming_verification", ValueKind::Bool},
+        {"performance", "tcp_info_window", ValueKind::Bool},
         {"logging", "enable", ValueKind::Bool},
         {"logging", "log_level", ValueKind::Option, 0, 0, log_level_options()},
         {"logging", "log_file", ValueKind::String},
@@ -362,6 +392,42 @@ std::vector<ConfigValidationIssue> validate_file_with_rules(const std::string& f
 
 std::string bool_string(bool value) {
     return value ? "true" : "false";
+}
+
+uint64_t get_uint64_prefer(const ConfigParser& parser,
+                           const std::string& primary_section,
+                           const std::string& primary_key,
+                           const std::string& legacy_section,
+                           const std::string& legacy_key,
+                           uint64_t default_value) {
+    if (parser.has_key(primary_section, primary_key)) {
+        return parser.get_uint64(primary_section, primary_key, default_value);
+    }
+    return parser.get_uint64(legacy_section, legacy_key, default_value);
+}
+
+int get_int_prefer(const ConfigParser& parser,
+                   const std::string& primary_section,
+                   const std::string& primary_key,
+                   const std::string& legacy_section,
+                   const std::string& legacy_key,
+                   int default_value) {
+    if (parser.has_key(primary_section, primary_key)) {
+        return parser.get_int(primary_section, primary_key, default_value);
+    }
+    return parser.get_int(legacy_section, legacy_key, default_value);
+}
+
+bool get_bool_prefer(const ConfigParser& parser,
+                     const std::string& primary_section,
+                     const std::string& primary_key,
+                     const std::string& legacy_section,
+                     const std::string& legacy_key,
+                     bool default_value) {
+    if (parser.has_key(primary_section, primary_key)) {
+        return parser.get_bool(primary_section, primary_key, default_value);
+    }
+    return parser.get_bool(legacy_section, legacy_key, default_value);
 }
 
 } // namespace
@@ -634,6 +700,14 @@ ServerConfig ServerConfig::load_from_file(const std::string& filename) {
         config.internal.adaptive_chunk_size = false;
         config.internal.max_chunk_size = static_cast<size_t>(std::stoull(max_chunk_str.empty() ? std::to_string(defaults::kMaxChunkSize) : max_chunk_str));
     }
+    config.internal.inflight_window_bytes = get_uint64_prefer(parser, "protocol.internal", "inflight_window_bytes", "performance", "inflight_window_bytes", config.internal.inflight_window_bytes);
+    config.internal.batch_bytes = get_uint64_prefer(parser, "protocol.internal", "batch_bytes", "performance", "batch_bytes", config.internal.batch_bytes);
+    config.internal.batch_chunks = get_int_prefer(parser, "protocol.internal", "batch_chunks", "performance", "batch_chunks", config.internal.batch_chunks);
+    config.internal.preallocate_files = get_bool_prefer(parser, "protocol.internal", "preallocate_files", "performance", "preallocate_files", config.internal.preallocate_files);
+    config.internal.trusted_skip_zero_fill = get_bool_prefer(parser, "protocol.internal", "trusted_skip_zero_fill", "performance", "trusted_skip_zero_fill", config.internal.trusted_skip_zero_fill);
+    config.internal.cache_hints = get_bool_prefer(parser, "protocol.internal", "cache_hints", "performance", "cache_hints", config.internal.cache_hints);
+    config.internal.streaming_verification = get_bool_prefer(parser, "protocol.internal", "streaming_verification", "performance", "streaming_verification", config.internal.streaming_verification);
+    config.internal.tcp_info_window = get_bool_prefer(parser, "protocol.internal", "tcp_info_window", "performance", "tcp_info_window", config.internal.tcp_info_window);
     
     // Protocol TLS
     config.tls.enable = parser.get_bool("protocol.tls", "enable", config.tls.enable);
@@ -716,6 +790,14 @@ ServerConfig ServerConfig::get_default() {
     config.internal.allow_anonymous = kServerAllowAnonymous;
     config.internal.max_chunk_size = kMaxChunkSize;
     config.internal.adaptive_chunk_size = kServerAdaptiveChunkSize;
+    config.internal.inflight_window_bytes = kDefaultInflightWindowBytes;
+    config.internal.batch_bytes = kDefaultBatchBytes;
+    config.internal.batch_chunks = kDefaultBatchChunks;
+    config.internal.preallocate_files = kDefaultPreallocateFiles;
+    config.internal.trusted_skip_zero_fill = kDefaultTrustedSkipZeroFill;
+    config.internal.cache_hints = kDefaultCacheHints;
+    config.internal.streaming_verification = kDefaultStreamingVerification;
+    config.internal.tcp_info_window = kDefaultTcpInfoWindow;
 
     config.tls.enable = kServerTlsEnabled;
     config.tls.server_cert_file = "";
@@ -771,7 +853,15 @@ void ServerConfig::create_default_file(const std::string& filename) {
     stream << "security_level = " << config.internal.security_level << "\n";
     stream << "users_file = " << config.internal.users_file << "\n";
     stream << "allow_anonymous = " << bool_string(config.internal.allow_anonymous) << "\n";
-    stream << "max_chunk_size = adaptive\n\n";
+    stream << "max_chunk_size = adaptive\n";
+    stream << "inflight_window_bytes = " << config.internal.inflight_window_bytes << "\n";
+    stream << "batch_bytes = " << config.internal.batch_bytes << "\n";
+    stream << "batch_chunks = " << config.internal.batch_chunks << "\n";
+    stream << "preallocate_files = " << bool_string(config.internal.preallocate_files) << "\n";
+    stream << "trusted_skip_zero_fill = " << bool_string(config.internal.trusted_skip_zero_fill) << "\n";
+    stream << "cache_hints = " << bool_string(config.internal.cache_hints) << "\n";
+    stream << "streaming_verification = " << bool_string(config.internal.streaming_verification) << "\n";
+    stream << "tcp_info_window = " << bool_string(config.internal.tcp_info_window) << "\n\n";
     stream << "[protocol.tls]\n";
     stream << "enable = " << bool_string(config.tls.enable) << "\n";
     stream << "tls_server_cert_file = " << config.tls.server_cert_file << "\n";
@@ -860,6 +950,13 @@ ClientConfig ClientConfig::load_from_file(const std::string& filename) {
     
     config.internal.chunk_size_increase_factor = std::stod(parser.get_string("protocol.internal", "chunk_size_increase_factor", std::to_string(config.internal.chunk_size_increase_factor)));
     config.internal.chunk_size_decrease_factor = std::stod(parser.get_string("protocol.internal", "chunk_size_decrease_factor", std::to_string(config.internal.chunk_size_decrease_factor)));
+    config.internal.inflight_window_bytes = get_uint64_prefer(parser, "protocol.internal", "inflight_window_bytes", "performance", "inflight_window_bytes", config.internal.inflight_window_bytes);
+    config.internal.batch_bytes = get_uint64_prefer(parser, "protocol.internal", "batch_bytes", "performance", "batch_bytes", config.internal.batch_bytes);
+    config.internal.batch_chunks = get_int_prefer(parser, "protocol.internal", "batch_chunks", "performance", "batch_chunks", config.internal.batch_chunks);
+    config.internal.preallocate_files = get_bool_prefer(parser, "protocol.internal", "preallocate_files", "performance", "preallocate_files", config.internal.preallocate_files);
+    config.internal.cache_hints = get_bool_prefer(parser, "protocol.internal", "cache_hints", "performance", "cache_hints", config.internal.cache_hints);
+    config.internal.streaming_verification = get_bool_prefer(parser, "protocol.internal", "streaming_verification", "performance", "streaming_verification", config.internal.streaming_verification);
+    config.internal.tcp_info_window = get_bool_prefer(parser, "protocol.internal", "tcp_info_window", "performance", "tcp_info_window", config.internal.tcp_info_window);
     
     // Protocol TLS
     config.tls.enable = parser.get_bool("protocol.tls", "enable", config.tls.enable);
@@ -949,6 +1046,13 @@ ClientConfig ClientConfig::get_default() {
     config.internal.max_chunk_size = kMaxChunkSize;
     config.internal.chunk_size_increase_factor = kChunkSizeIncreaseFactor;
     config.internal.chunk_size_decrease_factor = kChunkSizeDecreaseFactor;
+    config.internal.inflight_window_bytes = kDefaultInflightWindowBytes;
+    config.internal.batch_bytes = kDefaultBatchBytes;
+    config.internal.batch_chunks = kDefaultBatchChunks;
+    config.internal.preallocate_files = kDefaultPreallocateFiles;
+    config.internal.cache_hints = kDefaultCacheHints;
+    config.internal.streaming_verification = kDefaultStreamingVerification;
+    config.internal.tcp_info_window = kDefaultTcpInfoWindow;
 
     config.tls.enable = kClientTlsEnabled;
     config.tls.mutual_authentication = kClientTlsMutualAuthentication;
@@ -1019,7 +1123,14 @@ void ClientConfig::create_default_file(const std::string& filename) {
     stream << "min_chunk_size = " << config.internal.min_chunk_size << "\n";
     stream << "max_chunk_size = adaptive\n";
     stream << "chunk_size_increase_factor = " << config.internal.chunk_size_increase_factor << "\n";
-    stream << "chunk_size_decrease_factor = " << config.internal.chunk_size_decrease_factor << "\n\n";
+    stream << "chunk_size_decrease_factor = " << config.internal.chunk_size_decrease_factor << "\n";
+    stream << "inflight_window_bytes = " << config.internal.inflight_window_bytes << "\n";
+    stream << "batch_bytes = " << config.internal.batch_bytes << "\n";
+    stream << "batch_chunks = " << config.internal.batch_chunks << "\n";
+    stream << "preallocate_files = " << bool_string(config.internal.preallocate_files) << "\n";
+    stream << "cache_hints = " << bool_string(config.internal.cache_hints) << "\n";
+    stream << "streaming_verification = " << bool_string(config.internal.streaming_verification) << "\n";
+    stream << "tcp_info_window = " << bool_string(config.internal.tcp_info_window) << "\n\n";
     stream << "[protocol.tls]\n";
     stream << "enable = " << bool_string(config.tls.enable) << "\n";
     stream << "tls_mutual_authentication = " << bool_string(config.tls.mutual_authentication) << "\n";

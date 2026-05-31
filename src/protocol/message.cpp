@@ -467,23 +467,37 @@ void FileData::Chunk::deserialize_payload(const std::vector<uint8_t>& data_buffe
 std::vector<uint8_t> FileData::serialize_payload() const {
     std::vector<uint8_t> buffer;
 
+    size_t reserve_size = 8;
+    if (chunks.empty()) {
+        reserve_size += 8 + 8 + 4 + data.size() + 2;
+    } else {
+        for (const auto& chunk : chunks) {
+            reserve_size += 8 + 8 + 4 + chunk.data.size() + 2;
+        }
+    }
+    buffer.reserve(reserve_size);
+
     write_uint32(buffer, FILE_DATA_MAGIC);
     uint32_t chunk_count = chunks.empty() ? 1 : static_cast<uint32_t>(chunks.size());
     write_uint32(buffer, chunk_count);
 
+    auto write_chunk_payload = [&](uint64_t chunk_offset,
+                                   uint64_t chunk_uncompressed_size,
+                                   const std::vector<uint8_t>& chunk_data,
+                                   bool chunk_is_last,
+                                   bool chunk_compressed) {
+        write_uint64(buffer, chunk_offset);
+        write_uint64(buffer, chunk_uncompressed_size == 0 ? chunk_data.size() : chunk_uncompressed_size);
+        write_bytes(buffer, chunk_data);
+        buffer.push_back(chunk_is_last ? 1 : 0);
+        buffer.push_back(chunk_compressed ? 1 : 0);
+    };
+
     if (chunks.empty()) {
-        Chunk chunk;
-        chunk.offset = offset;
-        chunk.uncompressed_size = uncompressed_size == 0 ? data.size() : uncompressed_size;
-        chunk.data = data;
-        chunk.is_last_chunk = is_last_chunk;
-        chunk.compressed = compressed;
-        auto chunk_payload = chunk.serialize_payload();
-        buffer.insert(buffer.end(), chunk_payload.begin(), chunk_payload.end());
+        write_chunk_payload(offset, uncompressed_size, data, is_last_chunk, compressed);
     } else {
         for (const auto& chunk : chunks) {
-            auto chunk_payload = chunk.serialize_payload();
-            buffer.insert(buffer.end(), chunk_payload.begin(), chunk_payload.end());
+            write_chunk_payload(chunk.offset, chunk.uncompressed_size, chunk.data, chunk.is_last_chunk, chunk.compressed);
         }
     }
     

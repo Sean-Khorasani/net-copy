@@ -19,6 +19,20 @@
 namespace netcopy {
 namespace file {
 
+namespace {
+#ifdef _WIN32
+DWORD access_pattern_to_flags(FileAccessPattern access_pattern) {
+    DWORD flags = FILE_ATTRIBUTE_NORMAL;
+    if (access_pattern == FileAccessPattern::Sequential) {
+        flags |= FILE_FLAG_SEQUENTIAL_SCAN;
+    } else if (access_pattern == FileAccessPattern::Random) {
+        flags |= FILE_FLAG_RANDOM_ACCESS;
+    }
+    return flags;
+}
+#endif
+}
+
 bool FileManager::exists(const std::string& path) {
     return std::filesystem::exists(std::filesystem::u8path(path));
 }
@@ -235,6 +249,68 @@ void FileManager::create_file(const std::string& path, uint64_t size, bool auto_
         file.seekp(size - 1);
         file.write("", 1);
     }
+}
+
+bool FileManager::preallocate_file(const std::string& path, uint64_t size, bool auto_create, bool allow_set_valid_data, std::string* error_message) {
+    auto set_error = [&](const std::string& error) {
+        if (error_message) {
+            *error_message = error;
+        }
+    };
+
+    auto dir = get_directory(path);
+    if (auto_create && !dir.empty() && !exists(dir)) {
+        create_directories(dir);
+    }
+
+#ifdef _WIN32
+    HANDLE handle = CreateFileW(std::filesystem::u8path(path).wstring().c_str(),
+                                GENERIC_WRITE,
+                                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr,
+                                OPEN_ALWAYS,
+                                FILE_ATTRIBUTE_NORMAL,
+                                nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+        set_error("Failed to open file for preallocation: " + path);
+        return false;
+    }
+
+    FILE_ALLOCATION_INFO allocation_info{};
+    allocation_info.AllocationSize.QuadPart = static_cast<LONGLONG>(size);
+    if (!SetFileInformationByHandle(handle, FileAllocationInfo, &allocation_info, sizeof(allocation_info))) {
+        DWORD error = GetLastError();
+        CloseHandle(handle);
+        set_error("FileAllocationInfo failed for " + path + " (Windows error " + std::to_string(error) + ")");
+        return false;
+    }
+
+    FILE_END_OF_FILE_INFO eof_info{};
+    eof_info.EndOfFile.QuadPart = static_cast<LONGLONG>(size);
+    if (!SetFileInformationByHandle(handle, FileEndOfFileInfo, &eof_info, sizeof(eof_info))) {
+        DWORD error = GetLastError();
+        CloseHandle(handle);
+        set_error("FileEndOfFileInfo failed for " + path + " (Windows error " + std::to_string(error) + ")");
+        return false;
+    }
+
+    if (allow_set_valid_data && size > 0) {
+        // Requires SeManageVolumePrivilege. Failure is non-fatal because the file
+        // has still been allocated and sized safely.
+        SetFileValidData(handle, static_cast<LONGLONG>(size));
+    }
+
+    CloseHandle(handle);
+    return true;
+#else
+    std::error_code ec;
+    std::filesystem::resize_file(std::filesystem::u8path(path), size, ec);
+    if (ec) {
+        set_error("Failed to preallocate file " + path + ": " + ec.message());
+        return false;
+    }
+    return true;
+#endif
 }
 
 uint64_t FileManager::get_partial_file_size(const std::string& path) {
@@ -500,7 +576,7 @@ std::vector<uint8_t> FileManager::compute_file_hash(const std::string& path, con
     return hasher.finalize();
 }
 
-std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std::string& path, uint64_t block_size, const std::function<bool()>& should_cancel) {
+std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std::string& path, uint64_t block_size, const std::function<bool()>& should_cancel, std::vector<uint8_t>* file_hash) {
     if (!exists(path)) {
         throw FileException("File does not exist for block hashing: " + path);
     }
@@ -515,6 +591,7 @@ std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std:
     
     std::vector<BlockHash> hashes;
     std::vector<uint8_t> buffer(block_size);
+    crypto::Sha3Hasher full_file_hasher;
     uint64_t offset = 0;
     while (true) {
         if (should_cancel && should_cancel()) {
@@ -527,6 +604,9 @@ std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std:
         
         crypto::Sha3Hasher hasher;
         hasher.update(buffer.data(), bytes_read);
+        if (file_hash) {
+            full_file_hasher.update(buffer.data(), bytes_read);
+        }
         
         BlockHash bh;
         bh.offset = offset;
@@ -537,6 +617,9 @@ std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std:
     }
     if (should_cancel && should_cancel()) {
         throw FileException("Block hashing cancelled");
+    }
+    if (file_hash) {
+        *file_hash = full_file_hasher.finalize();
     }
     file.close();
     return hashes;
@@ -641,7 +724,7 @@ FileStream& FileStream::operator=(FileStream&& other) noexcept {
     return *this;
 }
 
-bool FileStream::open_read(const std::string& path) {
+bool FileStream::open_read(const std::string& path, FileAccessPattern access_pattern) {
     close();
     path_ = path;
 #ifdef _WIN32
@@ -654,7 +737,7 @@ bool FileStream::open_read(const std::string& path) {
                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                              nullptr,
                              OPEN_EXISTING,
-                             FILE_ATTRIBUTE_NORMAL,
+                             access_pattern_to_flags(access_pattern),
                              nullptr);
         if (handle != INVALID_HANDLE_VALUE) {
             break;
@@ -683,7 +766,7 @@ bool FileStream::open_read(const std::string& path) {
     return true;
 }
 
-bool FileStream::open_write(const std::string& path, bool truncate_on_zero, bool auto_create) {
+bool FileStream::open_write(const std::string& path, bool truncate_on_zero, bool auto_create, FileAccessPattern access_pattern) {
     close();
     path_ = path;
     
@@ -696,21 +779,33 @@ bool FileStream::open_write(const std::string& path, bool truncate_on_zero, bool
     
 #ifdef _WIN32
     DWORD disposition = truncate_on_zero ? CREATE_ALWAYS : OPEN_ALWAYS;
+    std::wstring wide_path = std::filesystem::u8path(path).wstring();
     HANDLE handle = INVALID_HANDLE_VALUE;
     int retry_count = 5;
     int delay_ms = 100;
+    bool cleared_read_only = false;
     while (retry_count > 0) {
-        handle = CreateFileW(std::filesystem::u8path(path).wstring().c_str(),
+        handle = CreateFileW(wide_path.c_str(),
                              GENERIC_WRITE,
                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                              nullptr,
                              disposition,
-                             FILE_ATTRIBUTE_NORMAL,
+                             access_pattern_to_flags(access_pattern),
                              nullptr);
         if (handle != INVALID_HANDLE_VALUE) {
             break;
         }
-        if (GetLastError() == ERROR_SHARING_VIOLATION) {
+        DWORD error = GetLastError();
+        if (truncate_on_zero && !cleared_read_only && error == ERROR_ACCESS_DENIED) {
+            DWORD attrs = GetFileAttributesW(wide_path.c_str());
+            if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_READONLY) != 0) {
+                if (SetFileAttributesW(wide_path.c_str(), attrs & ~FILE_ATTRIBUTE_READONLY)) {
+                    cleared_read_only = true;
+                    continue;
+                }
+            }
+        }
+        if (error == ERROR_SHARING_VIOLATION) {
             retry_count--;
             if (retry_count > 0) {
                 Sleep(delay_ms);
@@ -772,14 +867,30 @@ void FileStream::write(uint64_t offset, const uint8_t* data, size_t size) {
         throw FileException("FileStream write failed to seek: " + path_);
     }
     
-    DWORD bytes_written = 0;
-    if (!WriteFile(handle, data, static_cast<DWORD>(size), &bytes_written, nullptr)) {
-        throw FileException("FileStream write failed: " + path_);
+    size_t total_written = 0;
+    while (total_written < size) {
+        DWORD request = static_cast<DWORD>(
+            (std::min)(size - total_written, static_cast<size_t>(std::numeric_limits<DWORD>::max())));
+        DWORD bytes_written = 0;
+        if (!WriteFile(handle, data + total_written, request, &bytes_written, nullptr)) {
+            throw FileException("FileStream write failed: " + path_);
+        }
+        if (bytes_written == 0) {
+            throw FileException("FileStream write made no progress: " + path_);
+        }
+        total_written += bytes_written;
     }
 #else
-    ssize_t res = pwrite(fd_, data, size, static_cast<off_t>(offset));
-    if (res < 0) {
-        throw FileException("FileStream write failed: " + path_);
+    size_t total_written = 0;
+    while (total_written < size) {
+        ssize_t res = pwrite(fd_, data + total_written, size - total_written, static_cast<off_t>(offset + total_written));
+        if (res < 0) {
+            throw FileException("FileStream write failed: " + path_);
+        }
+        if (res == 0) {
+            throw FileException("FileStream write made no progress: " + path_);
+        }
+        total_written += static_cast<size_t>(res);
     }
 #endif
 }

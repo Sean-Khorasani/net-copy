@@ -104,6 +104,23 @@ void AsyncSocket::async_write(const void* buffer, size_t length, std::function<v
         );
     }
 }
+
+void AsyncSocket::async_write(const std::vector<asio::const_buffer>& buffers, std::function<void(ErrorCode, size_t)> handler) {
+    auto self = shared_from_this();
+    if (ssl_stream_) {
+        asio::async_write(*ssl_stream_, buffers,
+            [self, handler](const ErrorCode& ec, std::size_t bytes_transferred) {
+                handler(ec, bytes_transferred);
+            }
+        );
+    } else {
+        asio::async_write(socket_, buffers,
+            [self, handler](const ErrorCode& ec, std::size_t bytes_transferred) {
+                handler(ec, bytes_transferred);
+            }
+        );
+    }
+}
  
 void AsyncSocket::async_send_file(const std::string& filepath, uint64_t offset, uint64_t length, std::function<void(ErrorCode, size_t)> handler) {
     if (ssl_stream_) {

@@ -9,6 +9,7 @@
 #include "crypto/mlkem.h"
 #include "crypto/key_manager.h"
 #include "protocol/message.h"
+#include "network/windows_experimental.h"
 #ifdef _WIN32
 #include <winsock2.h>
 #else
@@ -38,6 +39,31 @@ size_t execute_io_sync(Func&& async_op) {
         }
     });
     return future.get();
+}
+
+uint64_t normalized_window_bytes(uint64_t configured) {
+    constexpr uint64_t fallback = config::defaults::kDefaultInflightWindowBytes;
+    constexpr uint64_t min_window = 4ull * 1024ull * 1024ull;
+    constexpr uint64_t max_window = 512ull * 1024ull * 1024ull;
+    uint64_t value = configured == 0 ? fallback : configured;
+    return (std::max)(min_window, (std::min)(value, max_window));
+}
+
+uint64_t normalized_batch_bytes(uint64_t configured, uint64_t window_bytes) {
+    constexpr uint64_t frame_margin = 1024ull * 1024ull;
+    uint64_t value = configured == 0 ? config::defaults::kDefaultBatchBytes : configured;
+    uint64_t max_frame_payload = config::defaults::kMaxFrameSize > frame_margin
+        ? config::defaults::kMaxFrameSize - frame_margin
+        : config::defaults::kMaxFrameSize;
+    value = (std::min)(value, max_frame_payload);
+    value = (std::min)(value, (std::max)(uint64_t(1), window_bytes / 2));
+    return (std::max)(uint64_t(64 * 1024), value);
+}
+
+size_t normalized_batch_chunks(int configured) {
+    int value = configured <= 0 ? config::defaults::kDefaultBatchChunks : configured;
+    value = (std::max)(1, (std::min)(value, config::defaults::kMaxBatchChunks));
+    return static_cast<size_t>(value);
 }
 }
 
@@ -732,22 +758,20 @@ void Client::send_message(const protocol::Message& message) {
     if (crypto_engine_) {
         data = encrypt_message(data);
     }
+    if (data.size() > config::defaults::kMaxFrameSize) {
+        throw ProtocolException("Client attempted to send a message exceeding the 64MB frame limit: " + std::to_string(data.size()) + " bytes");
+    }
 
     uint32_t length = htonl(static_cast<uint32_t>(data.size()));
     execute_io_sync([&](auto&& handler) {
-        async_socket_->async_write(&length, sizeof(length), std::move(handler));
-    });
-
-    size_t total_sent = 0;
-    while (total_sent < data.size()) {
-        size_t sent = execute_io_sync([&](auto&& handler) {
-            async_socket_->async_write(data.data() + total_sent, data.size() - total_sent, std::move(handler));
-        });
-        if (sent == 0) {
-            throw NetworkException("Failed to send message data (0 bytes sent)");
+        std::vector<asio::const_buffer> buffers;
+        buffers.reserve(2);
+        buffers.push_back(asio::buffer(&length, sizeof(length)));
+        if (!data.empty()) {
+            buffers.push_back(asio::buffer(data.data(), data.size()));
         }
-        total_sent += sent;
-    }
+        async_socket_->async_write(buffers, std::move(handler));
+    });
 }
 
 std::unique_ptr<protocol::Message> Client::receive_message() {
@@ -859,7 +883,8 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         
         // 3. Compute local block hashes
         uint64_t block_size = resp->block_size > 0 ? resp->block_size : 65536;
-        auto local_hashes = file::FileManager::compute_block_hashes(local_path, block_size, should_cancel);
+        std::vector<uint8_t> local_full_hash;
+        auto local_hashes = file::FileManager::compute_block_hashes(local_path, block_size, should_cancel, &local_full_hash);
         
         // 4. Compare hashes block by block
         struct BlockRange {
@@ -961,7 +986,9 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
         // E2E Integrity verification
         if (total_size > 0 && !merged_diffs.empty()) {
             LOG_INFO("Performing E2E integrity check for: " + local_path);
-            auto local_hash = file::FileManager::compute_file_hash(local_path, should_cancel);
+            auto local_hash = local_full_hash.empty()
+                ? file::FileManager::compute_file_hash(local_path, should_cancel)
+                : local_full_hash;
             
             protocol::FileVerifyRequest verify_req;
             verify_req.file_path = remote_path;
@@ -989,20 +1016,6 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
     if (!is_sym && remote_file_size > 0 && !resume && !do_delta_sync) {
         send_file_request(local_path, remote_path, false, true, resume_offset, &remote_file_size);
         resume_offset = 0;
-
-        // Send a 0-byte chunk to force the server to safely truncate the file before multiple streams write to it
-        protocol::FileData data_msg;
-        data_msg.offset = 0;
-        data_msg.uncompressed_size = 0;
-        data_msg.is_last_chunk = false;
-        data_msg.compressed = false;
-        send_message(data_msg);
-        
-        auto ack_msg = receive_message();
-        auto ack = dynamic_cast<protocol::FileAck*>(ack_msg.get());
-        if (!ack || !ack->success) {
-            throw FileException("Failed to truncate remote file: " + (ack ? ack->error_message : "Unknown error"));
-        }
     }
 
     bandwidth_monitor_.reset();
@@ -1279,7 +1292,8 @@ void Client::send_file_range(const std::string& file_path,
                              common::ChunkSizeManager& shared_chunk_manager,
                              common::BandwidthMonitor& shared_bandwidth_monitor,
                              const std::function<void(uint64_t)>& progress_delta_callback,
-                             bool is_final_range) {
+                             bool is_final_range,
+                             crypto::Sha3Hasher* stream_hasher) {
     if (!buffer_pool_) {
         // Fallback buffer pool initialization
         buffer_pool_ = std::make_shared<BufferPool>(negotiated_max_chunk_size_ > 0 ? negotiated_max_chunk_size_ : 10 * 1024 * 1024, 16);
@@ -1300,8 +1314,16 @@ void Client::send_file_range(const std::string& file_path,
     // Flow-control window: keep up to 64 MB in flight to allow pipelining.
     // The chunk size is capped to at most half this value so the wait
     // condition (in_flight + chunk_size <= window) is always reachable.
-    const uint64_t max_window_bytes = 64 * 1024 * 1024; // 64 MB in-flight window
-    const size_t max_chunk_for_window = static_cast<size_t>(max_window_bytes / 2); // 32 MB per chunk max
+    uint64_t configured_window_bytes = normalized_window_bytes(config_.internal.inflight_window_bytes);
+    if (config_.internal.tcp_info_window && async_socket_ && !async_socket_->is_tls()) {
+        configured_window_bytes = network::windows_experimental::recommended_tcp_inflight_window(
+            async_socket_->native_socket().native_handle(),
+            configured_window_bytes);
+    }
+    std::atomic<uint64_t> max_window_bytes(configured_window_bytes);
+    const uint64_t max_batch_bytes = normalized_batch_bytes(config_.internal.batch_bytes, configured_window_bytes);
+    const size_t max_batch_chunks = normalized_batch_chunks(config_.internal.batch_chunks);
+    const size_t max_chunk_for_window = static_cast<size_t>(configured_window_bytes / 2); // 32 MB per chunk max by default
 
     // Background disk read-ahead thread
     ReadAheadQueue read_queue(4); // Keep at most 4 chunks pre-read in memory
@@ -1361,7 +1383,11 @@ void Client::send_file_range(const std::string& file_path,
         reader_thread = std::thread([&]() {
             try {
                 file::FileStream file_stream;
-                if (!file_stream.open_read(file_path)) {
+                file::FileAccessPattern access_pattern =
+                    config_.internal.cache_hints && (start_offset == 0 && end_offset == total_size)
+                        ? file::FileAccessPattern::Sequential
+                        : (config_.internal.cache_hints ? file::FileAccessPattern::Random : file::FileAccessPattern::Normal);
+                if (!file_stream.open_read(file_path, access_pattern)) {
                     throw FileException("Failed to open source file for reading: " + file_path);
                 }
                 
@@ -1433,7 +1459,6 @@ void Client::send_file_range(const std::string& file_path,
     
     try {
         ReadAheadChunk current_chunk;
-        protocol::FileData data_msg;
         while (read_queue.pop(current_chunk)) {
             if (cancel_requested_) {
                 throw FileException("Transfer cancelled");
@@ -1442,11 +1467,28 @@ void Client::send_file_range(const std::string& file_path,
             if (ack_thread_failed.load()) {
                 throw FileException("ACK thread failed: " + ack_thread_error);
             }
-            
+
+            std::vector<ReadAheadChunk> batch;
+            batch.push_back(std::move(current_chunk));
+            uint64_t batch_uncompressed_bytes = batch.front().data->size();
+            bool batch_has_last = batch.front().is_last;
+
+            while (batch.size() < max_batch_chunks &&
+                   batch_uncompressed_bytes < max_batch_bytes &&
+                   !batch_has_last) {
+                ReadAheadChunk next_chunk;
+                if (!read_queue.try_pop(next_chunk)) {
+                    break;
+                }
+                batch_uncompressed_bytes += next_chunk.data->size();
+                batch_has_last = next_chunk.is_last;
+                batch.push_back(std::move(next_chunk));
+            }
+
             // Flow Control: block if in-flight bytes exceed window
             std::unique_lock<std::mutex> lock(ack_mutex);
             ack_cv.wait(lock, [&]() {
-                return in_flight_bytes.load() + current_chunk.data->size() <= max_window_bytes || 
+                return in_flight_bytes.load() + batch_uncompressed_bytes <= max_window_bytes.load() ||
                        cancel_requested_ || 
                        ack_thread_failed.load();
             });
@@ -1457,51 +1499,73 @@ void Client::send_file_range(const std::string& file_path,
             if (ack_thread_failed.load()) {
                 throw FileException("ACK thread failed: " + ack_thread_error);
             }
-            
-            // Build FILE_DATA message
-            data_msg.offset = current_chunk.offset;
-            data_msg.uncompressed_size = current_chunk.data->size();
-            
-            if (compress) {
-                auto compressed_data = common::compress_buffer(current_chunk.data->data(), current_chunk.data->size());
-                if (compressed_data.size() < current_chunk.data->size() &&
-                    compressed_data.size() <= negotiated_max_chunk_size_) {
-                    data_msg.data = std::move(compressed_data);
-                    data_msg.compressed = true;
-                } else {
-                    data_msg.data.resize(current_chunk.data->size());
-                    if (!current_chunk.data->empty()) {
-                        fast_mem::fast_memcpy(data_msg.data.data(), current_chunk.data->data(), current_chunk.data->size());
+
+            protocol::FileData data_msg;
+            uint64_t batch_last_end = bytes_sent;
+            size_t throttled_bytes = 0;
+
+            auto append_payload = [&](ReadAheadChunk& chunk, protocol::FileData::Chunk* out_chunk) {
+                const size_t original_size = chunk.data->size();
+                std::vector<uint8_t> payload;
+                bool compressed_payload = false;
+
+                if (stream_hasher && original_size > 0) {
+                    stream_hasher->update(chunk.data->data(), original_size);
+                }
+
+                if (compress) {
+                    auto compressed_data = common::compress_buffer(chunk.data->data(), original_size);
+                    if (compressed_data.size() < original_size &&
+                        compressed_data.size() <= negotiated_max_chunk_size_) {
+                        payload = std::move(compressed_data);
+                        compressed_payload = true;
                     }
-                    data_msg.compressed = false;
                 }
+
+                if (payload.empty() && original_size > 0) {
+                    payload.resize(original_size);
+                    fast_mem::fast_memcpy(payload.data(), chunk.data->data(), original_size);
+                }
+
+                if (out_chunk) {
+                    out_chunk->offset = chunk.offset;
+                    out_chunk->uncompressed_size = original_size;
+                    out_chunk->data = std::move(payload);
+                    out_chunk->compressed = compressed_payload;
+                    out_chunk->is_last_chunk = chunk.is_last;
+                } else {
+                    data_msg.offset = chunk.offset;
+                    data_msg.uncompressed_size = original_size;
+                    data_msg.data = std::move(payload);
+                    data_msg.compressed = compressed_payload;
+                    data_msg.is_last_chunk = chunk.is_last;
+                }
+
+                in_flight_chunks[chunk.offset] = original_size;
+                in_flight_bytes.fetch_add(original_size);
+                batch_last_end = chunk.offset + original_size;
+                throttled_bytes += original_size;
+                buffer_pool_->release(std::move(chunk.data));
+            };
+
+            if (batch.size() == 1) {
+                append_payload(batch.front(), nullptr);
             } else {
-                data_msg.data.resize(current_chunk.data->size());
-                if (!current_chunk.data->empty()) {
-                    fast_mem::fast_memcpy(data_msg.data.data(), current_chunk.data->data(), current_chunk.data->size());
+                data_msg.chunks.reserve(batch.size());
+                for (auto& chunk : batch) {
+                    protocol::FileData::Chunk out_chunk;
+                    append_payload(chunk, &out_chunk);
+                    data_msg.chunks.push_back(std::move(out_chunk));
                 }
-                data_msg.compressed = false;
             }
-            
-            data_msg.is_last_chunk = current_chunk.is_last;
-            
-            // Record in-flight details before writing to socket
-            uint64_t chunk_offset = current_chunk.offset;
-            size_t chunk_size = current_chunk.data->size();
-            
-            in_flight_chunks[chunk_offset] = chunk_size;
-            in_flight_bytes.fetch_add(chunk_size);
-            
-            // Return buffer to pool
-            buffer_pool_->release(std::move(current_chunk.data));
             
             lock.unlock(); // Release lock before sending message
             
             send_message(data_msg);
-            bytes_sent = chunk_offset + chunk_size;
+            bytes_sent = batch_last_end;
             
             if (bandwidth_limiter_) {
-                bandwidth_limiter_->throttle(chunk_size);
+                bandwidth_limiter_->throttle(throttled_bytes);
             }
         }
         
@@ -1764,11 +1828,23 @@ void Client::download_file(const std::string& remote_path, const std::string& lo
 
         // Open local file
         file::FileStream fs;
-        if (!fs.open_write(local_path, !resume)) {
+        file::FileAccessPattern write_pattern = config_.internal.cache_hints
+            ? file::FileAccessPattern::Sequential
+            : file::FileAccessPattern::Normal;
+        if (!fs.open_write(local_path, !resume, true, write_pattern)) {
             throw FileException("Failed to open local file for writing: " + local_path);
         }
 
         total_bytes = response->file_size;
+        if (config_.internal.preallocate_files && !resume && total_bytes > 0) {
+            std::string prealloc_error;
+            if (!file::FileManager::preallocate_file(local_path, total_bytes, true, false, &prealloc_error)) {
+                LOG_WARNING("Download preallocation skipped: " + prealloc_error);
+            }
+        }
+
+        crypto::Sha3Hasher download_hasher;
+        bool streaming_hash_valid = config_.internal.streaming_verification && !resume;
 
         while (bytes_received < total_bytes) {
             while (is_file_paused(remote_path) && !is_file_skipped(remote_path) && !cancel_requested_) {
@@ -1786,8 +1862,55 @@ void Client::download_file(const std::string& remote_path, const std::string& lo
                 throw ProtocolException("Expected FileData");
             }
 
+            struct TempChunk {
+                uint64_t offset;
+                uint64_t uncompressed_size;
+                const std::vector<uint8_t>& data;
+                bool is_last_chunk;
+                bool compressed;
+            };
+
+            std::vector<TempChunk> chunks_to_process;
+            if (!file_data->chunks.empty()) {
+                for (const auto& chunk : file_data->chunks) {
+                    chunks_to_process.push_back({chunk.offset, chunk.uncompressed_size, chunk.data, chunk.is_last_chunk, chunk.compressed});
+                }
+            } else {
+                chunks_to_process.push_back({file_data->offset, file_data->uncompressed_size, file_data->data, file_data->is_last_chunk, file_data->compressed});
+            }
+
+            bool saw_last_chunk = false;
             try {
-                fs.write(file_data->offset, file_data->data.data(), file_data->data.size());
+                for (const auto& chunk : chunks_to_process) {
+                    std::vector<uint8_t> decompressed_payload;
+                    const uint8_t* payload_ptr = nullptr;
+                    size_t payload_size = 0;
+                    if (chunk.compressed) {
+                        decompressed_payload = common::decompress_buffer(chunk.data, static_cast<size_t>(chunk.uncompressed_size));
+                        payload_ptr = decompressed_payload.data();
+                        payload_size = decompressed_payload.size();
+                    } else {
+                        payload_ptr = chunk.data.data();
+                        payload_size = chunk.data.size();
+                    }
+
+                    if (streaming_hash_valid && payload_size > 0) {
+                        if (chunk.offset == bytes_received) {
+                            download_hasher.update(payload_ptr, payload_size);
+                        } else {
+                            streaming_hash_valid = false;
+                        }
+                    }
+
+                    fs.write(chunk.offset, payload_ptr, payload_size);
+                    uint64_t end_offset = chunk.offset + payload_size;
+                    if (end_offset > bytes_received) {
+                        bytes_received = end_offset;
+                    }
+                    if (chunk.is_last_chunk) {
+                        saw_last_chunk = true;
+                    }
+                }
             } catch (const std::exception& e) {
                 protocol::FileAck ack;
                 ack.success = false;
@@ -1796,8 +1919,6 @@ void Client::download_file(const std::string& remote_path, const std::string& lo
                 send_message(ack);
                 throw FileException("Failed to write data to local file");
             }
-
-            bytes_received += file_data->data.size();
 
             // Send success ACK
             protocol::FileAck ack;
@@ -1809,7 +1930,7 @@ void Client::download_file(const std::string& remote_path, const std::string& lo
                 progress_callback_(bytes_received, total_bytes, remote_path);
             }
 
-            if (file_data->is_last_chunk) {
+            if (saw_last_chunk) {
                 break;
             }
         }
@@ -1821,7 +1942,9 @@ void Client::download_file(const std::string& remote_path, const std::string& lo
         // E2E Integrity check for download
         if (total_bytes > 0) {
             LOG_INFO("Performing E2E integrity check for downloaded file: " + local_path);
-            auto local_hash = file::FileManager::compute_file_hash(local_path);
+            auto local_hash = streaming_hash_valid
+                ? download_hasher.finalize()
+                : file::FileManager::compute_file_hash(local_path);
             
             protocol::FileVerifyRequest verify_req;
             verify_req.file_path = remote_path;

@@ -9,6 +9,7 @@
 #include "auth/user_db.h"
 #include "auth/auth_engine.h"
 #include "crypto/sha3.h"
+#include "network/windows_experimental.h"
 #include "logging/audit_log.h"
 #include <algorithm>
 #include <vector>
@@ -24,6 +25,33 @@
 
 namespace netcopy {
 namespace server {
+
+namespace {
+uint64_t normalized_window_bytes(uint64_t configured) {
+    constexpr uint64_t fallback = config::defaults::kDefaultInflightWindowBytes;
+    constexpr uint64_t min_window = 4ull * 1024ull * 1024ull;
+    constexpr uint64_t max_window = 512ull * 1024ull * 1024ull;
+    uint64_t value = configured == 0 ? fallback : configured;
+    return (std::max)(min_window, (std::min)(value, max_window));
+}
+
+uint64_t normalized_batch_bytes(uint64_t configured, uint64_t window_bytes) {
+    constexpr uint64_t frame_margin = 1024ull * 1024ull;
+    uint64_t value = configured == 0 ? config::defaults::kDefaultBatchBytes : configured;
+    uint64_t max_frame_payload = config::defaults::kMaxFrameSize > frame_margin
+        ? config::defaults::kMaxFrameSize - frame_margin
+        : config::defaults::kMaxFrameSize;
+    value = (std::min)(value, max_frame_payload);
+    value = (std::min)(value, (std::max)(uint64_t(1), window_bytes / 2));
+    return (std::max)(uint64_t(64 * 1024), value);
+}
+
+size_t normalized_batch_chunks(int configured) {
+    int value = configured <= 0 ? config::defaults::kDefaultBatchChunks : configured;
+    value = (std::max)(1, (std::min)(value, config::defaults::kMaxBatchChunks));
+    return static_cast<size_t>(value);
+}
+}
 
 struct ServerTransferSession {
     std::string session_id;
@@ -425,6 +453,7 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
     
     protocol::FileResponse response;
     current_transfer_completed_ = false;
+    current_file_stream_.close();
     
     try {
         // Validate destination path
@@ -460,6 +489,11 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         current_permissions_ = request.permissions;
         current_expected_file_size_ = request.file_size;
         current_expected_last_modified_ = request.last_modified;
+        current_preallocated_ = false;
+        current_upload_hash_next_offset_ = 0;
+        current_upload_hash_valid_ = config_.internal.streaming_verification && !request.is_symlink && request.resume_offset == 0;
+        current_upload_hasher_ = current_upload_hash_valid_ ? std::make_unique<crypto::Sha3Hasher>() : nullptr;
+        last_received_file_hash_valid_ = false;
         
         // Check if this is a resume request
         if (request.resume_offset > 0) {
@@ -476,6 +510,19 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         if (current_auto_create_ && !dir.empty() && !file::FileManager::exists(dir)) {
             file::FileManager::create_directories(dir);
             LOG_DEBUG("Created directory: " + dir);
+        }
+
+        if (current_truncate_on_zero_ && !current_is_symlink_) {
+            file::FileAccessPattern write_pattern = config_.internal.cache_hints
+                ? file::FileAccessPattern::Random
+                : file::FileAccessPattern::Normal;
+            file::FileStream truncate_stream;
+            if (!truncate_stream.open_write(resolved_path, true, current_auto_create_, write_pattern)) {
+                throw FileException("Failed to truncate destination file for writing: " + resolved_path);
+            }
+            truncate_stream.close();
+            current_truncate_on_zero_ = false;
+            LOG_DEBUG("Truncated destination file before receiving ranged data: " + resolved_path);
         }
         
         response.success = true;
@@ -583,10 +630,33 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
             } else {
                 if (!current_file_stream_.is_open() || current_file_stream_.get_path() != current_file_path_) {
                     current_file_stream_.close();
-                    if (!current_file_stream_.open_write(current_file_path_, current_truncate_on_zero_, current_auto_create_)) {
+                    file::FileAccessPattern write_pattern = config_.internal.cache_hints
+                        ? file::FileAccessPattern::Random
+                        : file::FileAccessPattern::Normal;
+                    if (!current_file_stream_.open_write(current_file_path_, current_truncate_on_zero_, current_auto_create_, write_pattern)) {
                         throw FileException("Failed to open destination file for writing: " + current_file_path_);
                     }
+                    if (config_.internal.preallocate_files && !current_preallocated_ && current_expected_file_size_ > 0) {
+                        std::string prealloc_error;
+                        if (!file::FileManager::preallocate_file(current_file_path_,
+                                                                 current_expected_file_size_,
+                                                                 current_auto_create_,
+                                                                 config_.internal.trusted_skip_zero_fill,
+                                                                 &prealloc_error)) {
+                            LOG_WARNING("Upload preallocation skipped: " + prealloc_error);
+                        }
+                        current_preallocated_ = true;
+                    }
                     current_truncate_on_zero_ = false;
+                }
+
+                if (current_upload_hasher_ && payload_size > 0) {
+                    if (current_upload_hash_valid_ && chunk.offset == current_upload_hash_next_offset_) {
+                        current_upload_hasher_->update(payload_ptr, payload_size);
+                        current_upload_hash_next_offset_ += payload_size;
+                    } else {
+                        current_upload_hash_valid_ = false;
+                    }
                 }
                 
                 current_file_stream_.write(chunk.offset, payload_ptr, payload_size);
@@ -660,6 +730,15 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
                 LOG_ERROR("Failed to set last write time: " + std::string(e.what()));
             }
         }
+        if (current_upload_hasher_ &&
+            current_upload_hash_valid_ &&
+            current_upload_hash_next_offset_ == current_expected_file_size_ &&
+            !current_is_symlink_ &&
+            !is_marker_file) {
+            last_received_file_hash_ = current_upload_hasher_->finalize();
+            last_received_file_hash_path_ = current_file_path_;
+            last_received_file_hash_valid_ = true;
+        }
         // Audit log the completed upload
         logging::AuditLog::instance().log_transfer(
             authenticated_user_, client_address_,
@@ -674,17 +753,13 @@ void ConnectionHandler::send_message(const protocol::Message& message) {
     if (transport_encryption_active_ && (crypto_engine_ || crypto_)) {
         data = encrypt_message(data);
     }
+    if (data.size() > config::defaults::kMaxFrameSize) {
+        throw ProtocolException("Server attempted to send a message exceeding the 64MB frame limit: " + std::to_string(data.size()) + " bytes");
+    }
     
     // Send message length first (network byte order)
     uint32_t length = htonl(static_cast<uint32_t>(data.size()));
-    client_socket_.send(&length, sizeof(length));
-    
-    // Send message data
-    size_t total_sent = 0;
-    while (total_sent < data.size()) {
-        size_t sent = client_socket_.send(data.data() + total_sent, data.size() - total_sent);
-        total_sent += sent;
-    }
+    client_socket_.send_vectored(&length, sizeof(length), data.data(), data.size());
 }
 
 std::unique_ptr<protocol::Message> ConnectionHandler::receive_message() {
@@ -1083,6 +1158,7 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
     resp.permissions = file::FileManager::get_permissions(resolved);
     resp.last_modified = (resp.is_directory || resp.is_symlink) ? 0 : file::FileManager::last_write_time(resolved);
     resp.success = true;
+    last_sent_file_hash_valid_ = false;
 
     // Create session
     std::string client_ip = get_client_address();
@@ -1099,7 +1175,10 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
 
     if (!resp.is_directory && !resp.is_symlink) {
         file::FileStream fs;
-        if (!fs.open_read(resolved)) {
+        file::FileAccessPattern read_pattern = config_.internal.cache_hints
+            ? file::FileAccessPattern::Sequential
+            : file::FileAccessPattern::Normal;
+        if (!fs.open_read(resolved, read_pattern)) {
             if (current_session_) {
                 current_session_->is_active = false;
                 current_session_->status = "failed";
@@ -1132,6 +1211,17 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
             std::atomic<bool> ack_thread_failed(false);
             std::mutex ack_mutex;
             std::condition_variable ack_cv;
+            uint64_t configured_window_bytes = normalized_window_bytes(config_.internal.inflight_window_bytes);
+            if (config_.internal.tcp_info_window && !client_socket_.is_tls()) {
+                configured_window_bytes = network::windows_experimental::recommended_tcp_inflight_window(
+                    client_socket_.native_handle(),
+                    configured_window_bytes);
+            }
+            const uint64_t max_window_bytes = configured_window_bytes;
+            const uint64_t max_batch_bytes = normalized_batch_bytes(config_.internal.batch_bytes, configured_window_bytes);
+            const size_t max_batch_chunks = normalized_batch_chunks(config_.internal.batch_chunks);
+            crypto::Sha3Hasher download_hasher;
+            bool download_hash_valid = config_.internal.streaming_verification && request.resume_offset == 0;
             
             std::thread ack_thread([&]() {
                 try {
@@ -1154,38 +1244,69 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
                 }
             });
 
-            std::vector<uint8_t> buf(CHUNK);
-            protocol::FileData chunk_msg;
-            chunk_msg.compressed = false;
-            
             while (offset < file_size && !ack_thread_failed.load()) {
                 {
                     std::unique_lock<std::mutex> lock(ack_mutex);
                     ack_cv.wait(lock, [&]() {
-                        return (offset - last_acknowledged_offset.load()) < 64 * 1024 * 1024 || ack_thread_failed.load();
+                        return (offset - last_acknowledged_offset.load()) < max_window_bytes || ack_thread_failed.load();
                     });
                 }
                 
                 if (ack_thread_failed.load()) break;
 
-                size_t to_read = static_cast<size_t>((std::min)(static_cast<uint64_t>(CHUNK), file_size - offset));
-                size_t nr = fs.read(offset, buf.data(), to_read);
-                if (nr == 0) break;
+                protocol::FileData batch_msg;
+                uint64_t batch_bytes = 0;
+                size_t batch_count = 0;
 
-                chunk_msg.offset = offset;
-                chunk_msg.uncompressed_size = nr;
-                chunk_msg.data.resize(nr);
-                if (nr > 0) {
-                    fast_mem::fast_memcpy(chunk_msg.data.data(), buf.data(), nr);
+                while (offset < file_size &&
+                       batch_count < max_batch_chunks &&
+                       batch_bytes < max_batch_bytes) {
+                    size_t to_read = static_cast<size_t>((std::min)(static_cast<uint64_t>(CHUNK), file_size - offset));
+                    protocol::FileData::Chunk chunk;
+                    chunk.offset = offset;
+                    chunk.data.resize(to_read);
+                    size_t nr = fs.read(offset, chunk.data.data(), to_read);
+                    if (nr == 0) {
+                        break;
+                    }
+                    chunk.data.resize(nr);
+                    chunk.uncompressed_size = nr;
+                    chunk.compressed = false;
+                    chunk.is_last_chunk = (offset + nr >= file_size);
+
+                    if (download_hash_valid) {
+                        download_hasher.update(chunk.data.data(), chunk.data.size());
+                    }
+
+                    offset += nr;
+                    batch_bytes += nr;
+                    ++batch_count;
+                    batch_msg.chunks.push_back(std::move(chunk));
+
+                    if (batch_msg.chunks.back().is_last_chunk) {
+                        break;
+                    }
                 }
-                chunk_msg.is_last_chunk = (offset + nr >= file_size);
+
+                if (batch_msg.chunks.empty()) {
+                    break;
+                }
                 
-                send_message(chunk_msg);
+                if (batch_msg.chunks.size() == 1) {
+                    auto only = std::move(batch_msg.chunks.front());
+                    batch_msg.chunks.clear();
+                    batch_msg.offset = only.offset;
+                    batch_msg.uncompressed_size = only.uncompressed_size;
+                    batch_msg.data = std::move(only.data);
+                    batch_msg.compressed = only.compressed;
+                    batch_msg.is_last_chunk = only.is_last_chunk;
+                }
+
+                send_message(batch_msg);
                 
                 if (current_session_) {
-                    current_session_->bytes_transferred = offset + nr;
+                    current_session_->bytes_transferred = offset;
                 }
-                offset += nr;
             }
             
             if (ack_thread.joinable()) {
@@ -1200,6 +1321,13 @@ void ConnectionHandler::handle_download_request(const protocol::DownloadRequest&
                     current_session_->logs.push_back("Download failed: missing or invalid ACK from client.");
                 }
                 trigger_webhook("download", resolved, request.remote_path, "failed", offset, "Download failed: missing or invalid ACK from client.");
+            }
+            if (!ack_thread_failed.load() && download_hash_valid && offset >= file_size) {
+                last_sent_file_hash_ = download_hasher.finalize();
+                last_sent_file_hash_path_ = resolved;
+                last_sent_file_hash_valid_ = true;
+            } else {
+                last_sent_file_hash_valid_ = false;
             }
         }
         fs.close();
@@ -1303,8 +1431,21 @@ void ConnectionHandler::handle_file_verify_request(const protocol::FileVerifyReq
             throw FileException("File not found: " + resolved);
         }
         
-        LOG_INFO("Computing checksum for E2E integrity check of " + resolved);
-        auto actual_hash = file::FileManager::compute_file_hash(resolved);
+        std::vector<uint8_t> actual_hash;
+        if (config_.internal.streaming_verification &&
+            last_received_file_hash_valid_ &&
+            file::FileManager::normalize_path(last_received_file_hash_path_) == resolved) {
+            actual_hash = last_received_file_hash_;
+            LOG_INFO("Using streamed upload checksum for E2E integrity check of " + resolved);
+        } else if (config_.internal.streaming_verification &&
+                   last_sent_file_hash_valid_ &&
+                   file::FileManager::normalize_path(last_sent_file_hash_path_) == resolved) {
+            actual_hash = last_sent_file_hash_;
+            LOG_INFO("Using streamed download checksum for E2E integrity check of " + resolved);
+        } else {
+            LOG_INFO("Computing checksum for E2E integrity check of " + resolved);
+            actual_hash = file::FileManager::compute_file_hash(resolved);
+        }
         response.actual_hash = actual_hash;
         
         if (actual_hash == request.expected_hash) {

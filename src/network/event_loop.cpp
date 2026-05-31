@@ -32,7 +32,7 @@ void EventLoop::start() {
             }
         });
     }
-    LOG_INFO("EventLoop started with " + std::to_string(num_threads_) + " worker threads.");
+    LOG_DEBUG("EventLoop started with " + std::to_string(num_threads_) + " worker threads.");
 }
 
 void EventLoop::stop() {
@@ -48,7 +48,7 @@ void EventLoop::stop() {
         }
     }
     workers_.clear();
-    LOG_INFO("EventLoop stopped.");
+    LOG_DEBUG("EventLoop stopped.");
 }
 
 void EventLoop::post(std::function<void()> task) {

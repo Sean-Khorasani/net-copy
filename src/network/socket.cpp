@@ -1,9 +1,11 @@
 #include "network/socket.h"
 #include "crypto/sha3.h"
 #include "exceptions.h"
+#include "common/fast_mem.h"
 #include <cstring>
 #include <limits>
 #include <algorithm>
+#include <array>
 
 #ifdef _WIN32
 #include <basetsd.h>
@@ -601,6 +603,96 @@ size_t Socket::send(const void* data, size_t length) {
         throw NetworkException("Failed to send data");
     }
     return static_cast<size_t>(bytes_sent);
+}
+
+size_t Socket::send_vectored(const void* first, size_t first_length, const void* second, size_t second_length) {
+    if (first_length == 0) {
+        return send(second, second_length);
+    }
+    if (second_length == 0) {
+        return send(first, first_length);
+    }
+
+    if (is_udp_ || ssl_) {
+        size_t total = 0;
+        while (total < first_length) {
+            size_t sent = send(static_cast<const uint8_t*>(first) + total, first_length - total);
+            if (sent == 0) {
+                throw NetworkException("Failed to send first vectored buffer");
+            }
+            total += sent;
+        }
+        size_t second_sent = 0;
+        while (second_sent < second_length) {
+            size_t sent = send(static_cast<const uint8_t*>(second) + second_sent, second_length - second_sent);
+            if (sent == 0) {
+                throw NetworkException("Failed to send second vectored buffer");
+            }
+            second_sent += sent;
+        }
+        return first_length + second_length;
+    }
+
+#ifdef _WIN32
+    const char* first_ptr = static_cast<const char*>(first);
+    const char* second_ptr = static_cast<const char*>(second);
+    size_t first_remaining = first_length;
+    size_t second_remaining = second_length;
+    size_t total_sent = 0;
+
+    while (first_remaining > 0 || second_remaining > 0) {
+        std::array<WSABUF, 2> buffers{};
+        DWORD buffer_count = 0;
+        if (first_remaining > 0) {
+            buffers[buffer_count].buf = const_cast<char*>(first_ptr);
+            buffers[buffer_count].len = static_cast<ULONG>((std::min)(first_remaining, static_cast<size_t>((std::numeric_limits<ULONG>::max)())));
+            ++buffer_count;
+        }
+        if (second_remaining > 0) {
+            buffers[buffer_count].buf = const_cast<char*>(second_ptr);
+            buffers[buffer_count].len = static_cast<ULONG>((std::min)(second_remaining, static_cast<size_t>((std::numeric_limits<ULONG>::max)())));
+            ++buffer_count;
+        }
+
+        DWORD bytes_sent = 0;
+        int result = WSASend(socket_, buffers.data(), buffer_count, &bytes_sent, 0, nullptr, nullptr);
+        if (result == SOCKET_ERROR_VALUE) {
+            throw NetworkException("Failed to send vectored data");
+        }
+        if (bytes_sent == 0) {
+            throw NetworkException("Vectored send made no progress");
+        }
+
+        total_sent += bytes_sent;
+        size_t remaining_to_consume = bytes_sent;
+        if (first_remaining > 0) {
+            size_t consumed = (std::min)(first_remaining, remaining_to_consume);
+            first_ptr += consumed;
+            first_remaining -= consumed;
+            remaining_to_consume -= consumed;
+        }
+        if (remaining_to_consume > 0 && second_remaining > 0) {
+            size_t consumed = (std::min)(second_remaining, remaining_to_consume);
+            second_ptr += consumed;
+            second_remaining -= consumed;
+        }
+    }
+
+    return total_sent;
+#else
+    std::vector<uint8_t> buffer(first_length + second_length);
+    fast_mem::fast_memcpy(buffer.data(), first, first_length);
+    fast_mem::fast_memcpy(buffer.data() + first_length, second, second_length);
+    size_t total_sent = 0;
+    while (total_sent < buffer.size()) {
+        size_t sent = send(buffer.data() + total_sent, buffer.size() - total_sent);
+        if (sent == 0) {
+            throw NetworkException("Failed to send vectored fallback buffer");
+        }
+        total_sent += sent;
+    }
+    return total_sent;
+#endif
 }
 
 size_t Socket::receive(void* buffer, size_t length) {
