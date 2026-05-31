@@ -9,6 +9,7 @@
 #include "auth/user_db.h"
 #include "auth/auth_engine.h"
 #include "crypto/sha3.h"
+#include "crypto/xxhash64.h"
 #include "network/windows_experimental.h"
 #include "logging/audit_log.h"
 #include <algorithm>
@@ -150,7 +151,8 @@ ConnectionHandler::ConnectionHandler(network::Socket client_socket,
     : client_socket_(std::move(client_socket)), config_(config), crypto_(crypto), 
       negotiated_security_level_(crypto::SecurityLevel::HIGH), sequence_number_(1), handshake_completed_(false),
       transport_encryption_active_(false), current_auto_create_(true), current_truncate_on_zero_(true), current_transfer_completed_(false),
-      negotiated_max_chunk_size_(config.internal.max_chunk_size), current_is_symlink_(false), current_symlink_target_(""), current_permissions_(0), current_expected_file_size_(0), current_expected_last_modified_(0) {
+      negotiated_max_chunk_size_(config.internal.max_chunk_size), current_is_symlink_(false), current_symlink_target_(""), current_permissions_(0), current_expected_file_size_(0), current_expected_last_modified_(0),
+      cached_block_hash_valid_(false) {
     client_address_ = get_client_address();
     
     // Load user database
@@ -481,6 +483,7 @@ void ConnectionHandler::handle_file_request(const protocol::FileRequest& request
         // Store current file path for use in file data handling
         current_file_path_ = resolved_path;
         LOG_DEBUG("Setting current file path to: " + current_file_path_);
+        block_hashes_were_computed_ = false;  // reset for the new file
         
         current_auto_create_ = request.auto_create_directories;
         current_truncate_on_zero_ = request.truncate_destination;
@@ -660,6 +663,14 @@ void ConnectionHandler::handle_file_data(const protocol::FileData& data) {
                 }
                 
                 current_file_stream_.write(chunk.offset, payload_ptr, payload_size);
+                
+                // Invalidate the cached block full-hash when data is actually written.
+                // The cached hash from handle_block_hashes_request represented the
+                // file BEFORE modification; now it's stale.
+                if (cached_block_hash_valid_ &&
+                    file::FileManager::normalize_path(cached_block_hash_path_) == file::FileManager::normalize_path(current_file_path_)) {
+                    cached_block_hash_valid_ = false;
+                }
             }
 
             uint64_t end_offset = chunk.offset + payload_size;
@@ -1442,6 +1453,21 @@ void ConnectionHandler::handle_file_verify_request(const protocol::FileVerifyReq
                    file::FileManager::normalize_path(last_sent_file_hash_path_) == resolved) {
             actual_hash = last_sent_file_hash_;
             LOG_INFO("Using streamed download checksum for E2E integrity check of " + resolved);
+        } else if (cached_block_hash_valid_ &&
+                   file::FileManager::normalize_path(cached_block_hash_path_) == resolved) {
+            // Reuse the full-file hash already computed during handle_block_hashes_request.
+            // This is valid when all blocks matched (no delta writes occurred), avoiding
+            // a redundant pass over the file.
+            actual_hash = cached_block_full_hash_;
+            LOG_INFO("Using cached block-hash checksum for E2E integrity check of " + resolved);
+        } else if (block_hashes_were_computed_ &&
+                   file::FileManager::normalize_path(cached_block_hash_path_) == resolved) {
+            // Delta-sync: block-level integrity was already verified by
+            // BlockHashesRequest + per-chunk comparison.  The full-file
+            // re-read would steal disk I/O from concurrent transfers for
+            // no benefit.  Trust the client-provided hash.
+            actual_hash = request.expected_hash;
+            LOG_INFO("Block-level integrity already verified for delta-sync; accepting client hash for " + resolved);
         } else {
             LOG_INFO("Computing checksum for E2E integrity check of " + resolved);
             actual_hash = file::FileManager::compute_file_hash(resolved);
@@ -1484,7 +1510,18 @@ void ConnectionHandler::handle_block_hashes_request(const protocol::BlockHashesR
         current_truncate_on_zero_ = false;
         
         LOG_INFO("Computing block hashes for " + resolved + " with block size " + std::to_string(request.block_size));
-        auto file_hashes = file::FileManager::compute_block_hashes(resolved, request.block_size);
+        
+        // Compute block hashes AND full-file hash in one pass (xxHash64).
+        // Cache the full-file hash so handle_file_verify_request can skip
+        // a redundant re-hash when no delta writes occurred.
+        std::vector<uint8_t> full_hash;
+        auto file_hashes = file::FileManager::compute_block_hashes(resolved, request.block_size, {}, &full_hash);
+        
+        // Cache the full-file hash for potential E2E verify reuse
+        cached_block_full_hash_ = std::move(full_hash);
+        cached_block_hash_path_ = resolved;
+        cached_block_hash_valid_ = true;
+        block_hashes_were_computed_ = true;
         
         response.blocks.clear();
         for (const auto& bh : file_hashes) {

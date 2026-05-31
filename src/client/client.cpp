@@ -864,10 +864,10 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
                 return cancel_requested_.load();
             };
         
-        // 1. Send BlockHashesRequest
+        // 1. Send BlockHashesRequest with adaptive block size
         protocol::BlockHashesRequest req;
         req.file_path = remote_path;
-        req.block_size = 65536; // 64KB
+        req.block_size = file::FileManager::compute_optimal_block_size(total_size);
         
         send_message(req);
         
@@ -881,10 +881,16 @@ void Client::transfer_single_file(const std::string& local_path, const std::stri
             throw FileException("Failed to get remote block hashes: " + resp->error_message);
         }
         
-        // 3. Compute local block hashes
+        // 3. Compute local block hashes (with progress feedback for large files)
         uint64_t block_size = resp->block_size > 0 ? resp->block_size : 65536;
         std::vector<uint8_t> local_full_hash;
+        if (total_size >= 64ull * 1024 * 1024) {
+            LOG_INFO("Computing local block signatures for " + local_path + " (block size " + std::to_string(block_size) + " bytes)...");
+        }
         auto local_hashes = file::FileManager::compute_block_hashes(local_path, block_size, should_cancel, &local_full_hash);
+        if (total_size >= 64ull * 1024 * 1024) {
+            LOG_INFO("Local block signatures computed (" + std::to_string(local_hashes.size()) + " blocks).");
+        }
         
         // 4. Compare hashes block by block
         struct BlockRange {
@@ -1347,6 +1353,12 @@ void Client::send_file_range(const std::string& file_path,
                     
                     uint64_t bytes_received = ack->bytes_received;
                     
+                    // Collect progress deltas to report OUTSIDE the ack_mutex.
+                    // Calling progress_delta_callback while holding ack_mutex
+                    // cascades into shared mutexes + slow console I/O, which
+                    // serialises all parallel workers and collapses throughput.
+                    uint64_t progress_delta = 0;
+                    
                     std::lock_guard<std::mutex> lock(ack_mutex);
                     auto it = in_flight_chunks.begin();
                     while (it != in_flight_chunks.end() && it->first + it->second <= bytes_received) {
@@ -1356,9 +1368,7 @@ void Client::send_file_range(const std::string& file_path,
                         shared_bandwidth_monitor.record_bytes(chunk_size);
                         shared_chunk_manager.update_chunk_size(shared_bandwidth_monitor, true, chunk_size);
                         
-                        if (progress_delta_callback) {
-                            progress_delta_callback(chunk_size);
-                        }
+                        progress_delta += chunk_size;
                         
                         last_acknowledged_offset = chunk_offset + chunk_size;
                         in_flight_bytes.fetch_sub(chunk_size);
@@ -1367,6 +1377,11 @@ void Client::send_file_range(const std::string& file_path,
                     }
                     
                     ack_cv.notify_all();
+                    // --- ack_mutex released ---
+                    
+                    if (progress_delta > 0 && progress_delta_callback) {
+                        progress_delta_callback(progress_delta);
+                    }
                 }
             } catch (const std::exception& e) {
                 ack_thread_error = e.what();

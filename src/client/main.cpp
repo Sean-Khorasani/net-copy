@@ -719,6 +719,15 @@ int client_main(int argc, char* argv[]) {
         auto state = std::make_shared<ProgressState>();
         
         client.set_progress_callback(static_cast<netcopy::client::Client::ProgressCallback>([bandwidth_monitor, state, use_ansi, args, &client, overwrite_state](uint64_t bytes_transferred, uint64_t total_bytes, const std::string& current_file) {
+            // Prepare output under the state lock, but defer console I/O
+            // to outside the lock so shared-mutex contention does not
+            // serialize all parallel transfer workers.
+            std::string output;
+            bool draw_ansi = false;
+            int ansi_lines_up = 0;
+            int ansi_slot_count = 0;
+            
+            {
             std::lock_guard<std::mutex> lock(state->mutex);
             if (total_bytes == 0) return;
 
@@ -764,7 +773,7 @@ int client_main(int argc, char* argv[]) {
             line << filename << ": " << std::fixed << std::setprecision(1) << progress << "% "
                  << "(" << format_size(bytes_transferred) << "/" << format_size(total_bytes) << ") "
                  << "at " << rate_str;
-            std::string output = line.str();
+            output = line.str();
 
             bool is_concurrent = args.recursive && !args.download && (client.get_negotiated_parallel_streams() > 1);
 
@@ -808,10 +817,10 @@ int client_main(int argc, char* argv[]) {
                     }
                     state->slot_line_lengths[slot] = output.size();
 
-                    // Draw to slot
-                    int N = state->max_slot_used + 1;
-                    int lines_up = N - slot;
-                    std::cout << "\033[" << lines_up << "A\r\033[K" << output << "\033[" << lines_up << "B\r" << std::flush;
+                    // Defer console I/O — store parameters for use outside the lock
+                    ansi_slot_count = state->max_slot_used + 1;
+                    ansi_lines_up = ansi_slot_count - slot;
+                    draw_ansi = true;
 
                     // If completed, release slot
                     if (bytes_transferred >= total_bytes) {
@@ -819,21 +828,34 @@ int client_main(int argc, char* argv[]) {
                         state->file_to_slot.erase(current_file);
                     }
                 } else {
-                    // Sequential with ANSI support
-                    std::cout << "\r\033[K" << output << std::flush;
+                    // Sequential with ANSI support — defer I/O
+                    draw_ansi = true;
                     if (bytes_transferred >= total_bytes) {
-                        std::cout << "\n";
+                        output += "\n";
                     }
                 }
             } else {
                 // Non-ANSI fallback (e.g. redirected output, logs)
                 if (state->started_files.find(current_file) == state->started_files.end()) {
-                    std::cout << "Transferring " << filename << " (" << format_size(total_bytes) << ")..." << std::endl;
                     state->started_files.insert(current_file);
+                    std::cout << "Transferring " << filename << " (" << format_size(total_bytes) << ")..." << std::endl;
                 }
                 if (bytes_transferred >= total_bytes && state->completed_files.find(current_file) == state->completed_files.end()) {
-                    std::cout << "Completed " << filename << " (" << format_size(total_bytes) << ") at " << rate_str << std::endl;
                     state->completed_files.insert(current_file);
+                    std::cout << "Completed " << filename << " (" << format_size(total_bytes) << ") at " << rate_str << std::endl;
+                }
+                return;
+            }
+            } // --- state->mutex released ---
+
+            // Perform console I/O OUTSIDE the state lock so other workers
+            // are not serialized behind slow terminal writes.
+            if (draw_ansi) {
+                if (ansi_slot_count > 0) {
+                    std::cout << "\033[" << ansi_lines_up << "A\r\033[K" << output
+                              << "\033[" << ansi_lines_up << "B\r" << std::flush;
+                } else {
+                    std::cout << "\r\033[K" << output << std::flush;
                 }
             }
         }));

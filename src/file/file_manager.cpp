@@ -1,7 +1,7 @@
 #include "file/file_manager.h"
 #include "common/chunk_size_manager.h"
 #include "exceptions.h"
-#include "crypto/sha3.h"
+#include "crypto/xxhash64.h"
 #include <algorithm>
 #include <regex>
 #include <vector>
@@ -555,8 +555,8 @@ std::vector<uint8_t> FileManager::compute_file_hash(const std::string& path, con
         throw FileException("Failed to open file for hashing: " + path);
     }
     
-    crypto::Sha3Hasher hasher;
-    std::vector<uint8_t> buffer(64 * 1024); // 64KB block size for hashing
+    crypto::XxHash64Hasher hasher;
+    std::vector<uint8_t> buffer(256 * 1024); // 256 KB read buffer for throughput
     uint64_t offset = 0;
     while (true) {
         if (should_cancel && should_cancel()) {
@@ -583,6 +583,9 @@ std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std:
     if (!is_regular_file(path)) {
         throw FileException("Path is not a regular file: " + path);
     }
+    if (block_size == 0) {
+        block_size = 65536;
+    }
     
     FileStream file;
     if (!file.open_read(path)) {
@@ -590,8 +593,8 @@ std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std:
     }
     
     std::vector<BlockHash> hashes;
-    std::vector<uint8_t> buffer(block_size);
-    crypto::Sha3Hasher full_file_hasher;
+    std::vector<uint8_t> buffer(static_cast<size_t>(block_size));
+    crypto::XxHash64Hasher full_file_hasher;
     uint64_t offset = 0;
     while (true) {
         if (should_cancel && should_cancel()) {
@@ -602,16 +605,15 @@ std::vector<FileManager::BlockHash> FileManager::compute_block_hashes(const std:
             break;
         }
         
-        crypto::Sha3Hasher hasher;
-        hasher.update(buffer.data(), bytes_read);
+        // Use one-shot xxHash64 for this block (faster than streaming per-block)
+        BlockHash bh;
+        bh.offset = offset;
+        bh.hash = crypto::xxhash64_bytes(buffer.data(), bytes_read);
+        hashes.push_back(std::move(bh));
+        
         if (file_hash) {
             full_file_hasher.update(buffer.data(), bytes_read);
         }
-        
-        BlockHash bh;
-        bh.offset = offset;
-        bh.hash = hasher.finalize();
-        hashes.push_back(std::move(bh));
         
         offset += bytes_read;
     }
@@ -678,6 +680,33 @@ bool FileManager::create_symlink(const std::string& target, const std::string& s
         return false;
     }
     return true;
+}
+
+uint64_t FileManager::compute_optimal_block_size(uint64_t file_size) {
+    // Adaptive block-size scaling for delta-sync performance.
+    // Goals: keep block count in [256, 16384] range so that:
+    //   - Hash overhead stays low (fewer blocks for huge files)
+    //   - Delta granularity stays reasonable (more blocks for small files)
+    //
+    // Tier          File size        Block size    Max blocks
+    // ───────────   ──────────────   ──────────    ──────────
+    // Tiny          < 16 MiB         64 KiB        256
+    // Small         16 – 128 MiB     256 KiB       512
+    // Medium        128 MiB – 1 GiB  1 MiB         1024
+    // Large         1 – 8 GiB        4 MiB         2048
+    // Huge          > 8 GiB          8 MiB         2048+
+
+    if (file_size < 16ull * 1024 * 1024) {
+        return 64 * 1024;                              // 64 KiB
+    } else if (file_size < 128ull * 1024 * 1024) {
+        return 256 * 1024;                             // 256 KiB
+    } else if (file_size < 1024ull * 1024 * 1024) {
+        return 1024 * 1024;                            // 1 MiB
+    } else if (file_size < 8ull * 1024 * 1024 * 1024) {
+        return 4ull * 1024 * 1024;                     // 4 MiB
+    } else {
+        return 8ull * 1024 * 1024;                     // 8 MiB
+    }
 }
 
 // FileStream implementation
