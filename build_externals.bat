@@ -15,58 +15,25 @@ if "%~1"=="clean" set "CLEAN_BUILD=1"
 if "%~1"=="-clean" set "CLEAN_BUILD=1"
 if "%~1"=="--clean" set "CLEAN_BUILD=1"
 if "%~1"=="\clean" set "CLEAN_BUILD=1"
-if "%~1"=="\\/clean" set "CLEAN_BUILD=1"
+if "%~1"=="\/clean" set "CLEAN_BUILD=1"
 if "%~1"=="/clean" set "CLEAN_BUILD=1"
-
-:: Quick check if external dependencies exist (wolfSSL from vcpkg, wolfSSH + liboqs from FetchContent)
-set "EXT_EXIST=1"
-if not exist "build_vs\_deps\liboqs-build\lib\Release\oqs.lib"        set "EXT_EXIST=0"
-if not exist "build_vs\vcpkg_installed\x64-windows\bin\lz4.dll"       set "EXT_EXIST=0"
-if not exist "build_vs\vcpkg_installed\x64-windows\bin\wolfssl.dll"   set "EXT_EXIST=0"
-if not exist "build_vs\Release\wolfssh.lib"                               set "EXT_EXIST=0"
-
-if "%EXT_EXIST%"=="0" (
-    echo [WARNING] External dependencies not found or incomplete.
-    echo Running build_externals.bat first...
-    call "%~dp0build_externals.bat"
-    if %ERRORLEVEL% neq 0 (
-        echo [ERROR] Failed to build external dependencies!
-        exit /b 1
-    )
-)
-
-:: Check if already in VS Developer Command Prompt
-if defined VSCMD_ARG_TGT_ARCH (
-    echo [OK] Already in Visual Studio Developer Command Prompt
-    echo    Architecture: %VSCMD_ARG_TGT_ARCH%
-    if defined VisualStudioVersion echo    VS Version: %VisualStudioVersion%
-    goto :skip_vs_setup
-)
-
-:: Check for Visual Studio installations
-set "VS_FOUND="
-set "VS_PATH="
-set "VS_VERSION="
-
-echo Detecting Visual Studio installations...
-
-:: 1. Try vswhere (most robust)
-if exist "%PF86%\Microsoft Visual Studio\Installer\vswhere.exe" (
-    for /f "usebackq tokens=*" %%i in (`"%PF86%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
-        if exist "%%i\VC\Auxiliary\Build\vcvarsall.bat" (
-            set "VS_PATH=%%i"
-            set "VS_VERSION=Auto-detected via vswhere"
-            set "VS_FOUND=1"
-            goto :vs_found
-        )
-    )
-)
 
 :: Parse arguments
 set "FORCE_BUILD=0"
 if "%~1"=="--force" set "FORCE_BUILD=1"
 if "%~1"=="-f" set "FORCE_BUILD=1"
 if "%~1"=="force" set "FORCE_BUILD=1"
+if "%CLEAN_BUILD%"=="1" set "FORCE_BUILD=1"
+
+if "%CLEAN_BUILD%"=="1" (
+    echo Clean external build requested. Removing generated dependency state...
+    if exist "build_vs\CMakeCache.txt" del /f /q "build_vs\CMakeCache.txt"
+    if exist "build_vs\CMakeFiles" rmdir /s /q "build_vs\CMakeFiles"
+    if exist "build_vs\_deps" rmdir /s /q "build_vs\_deps"
+    if exist "build_vs\vcpkg_installed" rmdir /s /q "build_vs\vcpkg_installed"
+    if exist "build_vs\Release\wolfssh.lib" del /f /q "build_vs\Release\wolfssh.lib"
+    if exist "build_vs\Release\oqs.lib" del /f /q "build_vs\Release\oqs.lib"
+)
 
 :: Quick check if dependencies already exist
 :: wolfSSL comes from vcpkg; wolfSSH and liboqs are FetchContent
@@ -89,6 +56,7 @@ echo   - wolfSSH   (optional SSH/SCP/SFTP server, FetchContent)
 echo   - liboqs    (ML-KEM post-quantum crypto, FetchContent)
 echo.
 echo If you want to force rebuild them, run: %~nx0 --force
+echo If the dependency cache is damaged, run: %~nx0 --clean
 exit /b 0
 
 :do_build
@@ -109,8 +77,8 @@ set "VS_VERSION="
 echo Detecting Visual Studio installations...
 
 :: 1. Try vswhere (most robust)
-if exist "%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" (
-    for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
+if exist "%PF86%\Microsoft Visual Studio\Installer\vswhere.exe" (
+    for /f "usebackq tokens=*" %%i in (`"%PF86%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do (
         if exist "%%i\VC\Auxiliary\Build\vcvarsall.bat" (
             set "VS_PATH=%%i"
             set "VS_VERSION=Auto-detected via vswhere"

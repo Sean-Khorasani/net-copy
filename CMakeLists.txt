@@ -36,6 +36,13 @@ FetchContent_MakeAvailable(asio)
 
 # CUDA configuration (optional)
 option(ENABLE_CUDA "Enable CUDA support for GPU acceleration" OFF)
+option(WITH_RIO "Compile experimental Windows Registered I/O capability hooks" OFF)
+option(WITHRIO "Alias for WITH_RIO" OFF)
+option(WITHIORING "Compile experimental Windows I/O Ring capability hooks" OFF)
+option(WITH_MSQUIC "Compile experimental MsQuic capability hooks" OFF)
+option(WITHMSQUIC "Alias for WITH_MSQUIC" OFF)
+option(WITH_TCP_INFO_WINDOW "Use Windows SIO_TCP_INFO to tune transfer in-flight windows when requested by config" OFF)
+option(WITHTCPINFO "Alias for WITH_TCP_INFO_WINDOW" OFF)
 
 if(ENABLE_CUDA)
     # Set CUDA host compiler before enabling CUDA language
@@ -146,6 +153,7 @@ set(COMMON_SOURCES
     src/network/socket.cpp
     src/network/event_loop.cpp
     src/network/async_socket.cpp
+    src/network/windows_experimental.cpp
     src/protocol/message.cpp
     src/file/file_manager.cpp
     src/config/config_parser.cpp
@@ -182,6 +190,21 @@ add_library(net_copy_common STATIC ${COMMON_SOURCES})
 # Add ASIO include directory and define standalone flag
 target_include_directories(net_copy_common PUBLIC ${asio_SOURCE_DIR}/asio/include)
 target_compile_definitions(net_copy_common PUBLIC ASIO_STANDALONE)
+
+if(WIN32)
+    if(WITH_RIO OR WITHRIO)
+        target_compile_definitions(net_copy_common PUBLIC NETCOPY_WITH_RIO WITHRIO)
+    endif()
+    if(WITHIORING)
+        target_compile_definitions(net_copy_common PUBLIC NETCOPY_WITH_IORING WITHIORING)
+    endif()
+    if(WITH_MSQUIC OR WITHMSQUIC)
+        target_compile_definitions(net_copy_common PUBLIC NETCOPY_WITH_MSQUIC WITHMSQUIC)
+    endif()
+    if(WITH_TCP_INFO_WINDOW OR WITHTCPINFO)
+        target_compile_definitions(net_copy_common PUBLIC NETCOPY_WITH_TCP_INFO_WINDOW WITHTCPINFO)
+    endif()
+endif()
 
 
 # Try to find LZ4, otherwise continue without it (compression.cpp handles this)
@@ -288,7 +311,7 @@ message(STATUS "liboqs fetched - ML-KEM authentication will be enabled")
 
 # Windows: link bcrypt for BCryptGenRandom used in sha3.cpp
 if(WIN32)
-    target_link_libraries(net_copy_common PUBLIC bcrypt)
+    target_link_libraries(net_copy_common PUBLIC bcrypt mswsock)
 endif()
 
 # Link wolfSSL (vcpkg) and wolfSSH (FetchContent)

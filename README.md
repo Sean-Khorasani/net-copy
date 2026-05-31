@@ -184,8 +184,8 @@ The server configuration file (`server.conf`) controls network listeners, protoc
 
 #### `[protocol]`
 * **`default_protocol`** (Default: `"internal"`)
-  * **Meaning**: Defines the default server protocol to accept on `listen_port`. 
-  * **Options**: `"internal"`, `"tls"`, `"ssh"`, `"sftp"`.
+  * **Meaning**: Defines the default server protocol to accept on `listen_port`. TLS is enabled separately and wraps the internal protocol.
+  * **Options**: `"internal"`, `"ssh"`, `"sftp"`.
 
 #### `[protocol.internal]`
 * **`enable`** (Default: `true`)
@@ -206,10 +206,16 @@ The server configuration file (`server.conf`) controls network listeners, protoc
   * **Meaning**: Allow connections that do not specify a user credential, bypassing database validation (though still requiring the master `secret_key` if `require_auth` is enabled).
 * **`max_chunk_size`** (Default: `"adaptive"`)
   * **Meaning**: The negotiated maximum chunk block size. Use `"adaptive"` (recommended) or specify a literal integer cap.
+* **`inflight_window_bytes`** (Default: `67108864`)
+  * **Meaning**: Internal protocol send window for unacknowledged transfer data.
+* **`batch_bytes`** / **`batch_chunks`** (Default: `0` / `1`)
+  * **Meaning**: Optional internal protocol chunk batching. Defaults keep the legacy one-message-per-chunk path.
+* **`preallocate_files`**, **`cache_hints`**, **`streaming_verification`**, **`tcp_info_window`**
+  * **Meaning**: Internal protocol Windows performance/verification experiments. Defaults are disabled while benchmarking.
 
 #### `[protocol.tls]`
 * **`enable`** (Default: `false`)
-  * **Meaning**: Enables a standard TLS / FTPS server protocol layer.
+  * **Meaning**: Enables TLS transport for the NetCopy internal protocol. This is not the SSH/SFTP data path.
 * **`tls_server_cert_file`** (Default: `"ssh_cert.pem"`)
   * **Meaning**: Path to the server's public certificate file.
 * **`tls_server_key_file`** (Default: `"ssh_host_ec_key.der"`)
@@ -325,7 +331,7 @@ The client configuration file (`client.conf`) defines security parameters, conne
 
 #### `[protocol]`
 * **`default_protocol`** (Default: `"internal"`)
-  * **Meaning**: Default protocol scheme when none is specified.
+  * **Meaning**: Default protocol scheme when none is specified. TLS is enabled separately and wraps the internal protocol.
 
 #### `[protocol.internal]`
 * **`secret_key`** (Default: `""`)
@@ -352,6 +358,12 @@ The client configuration file (`client.conf`) defines security parameters, conne
   * **Meaning**: AIMD growth multiplier on successful chunk ACK.
 * **`chunk_size_decrease_factor`** (Default: `0.5`)
   * **Meaning**: AIMD shrinking multiplier upon encountering connection delays or packet drops.
+* **`inflight_window_bytes`** (Default: `67108864`)
+  * **Meaning**: Internal protocol send window for unacknowledged transfer data.
+* **`batch_bytes`** / **`batch_chunks`** (Default: `0` / `1`)
+  * **Meaning**: Optional internal protocol chunk batching. Defaults keep the legacy one-message-per-chunk path.
+* **`preallocate_files`**, **`cache_hints`**, **`streaming_verification`**, **`tcp_info_window`**
+  * **Meaning**: Internal protocol Windows performance/verification experiments. Defaults are disabled while benchmarking.
 
 #### `[performance]`
 * **`max_bandwidth_percent`** (Default: `100`)
