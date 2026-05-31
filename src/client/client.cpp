@@ -71,10 +71,10 @@ void Client::load_config(const std::string& config_file) {
 
     auto& logger = logging::Logger::instance();
     logger.set_level(logging::Logger::string_to_level(config_.logging.level));
+    logger.set_console_level(logging::Logger::string_to_level(config_.console.level));
     logger.set_console_output(config_.console.enable);
-    if (!config_.logging.file.empty()) {
-        logger.set_file_output(config_.logging.file);
-    }
+    logger.set_json_format(config_.logging.format == config::defaults::kLogFormatJson);
+    logger.set_file_output(config_.logging.enable ? config_.logging.file : "");
 
     chunk_size_manager_.set_limits(config_.internal.initial_chunk_size, config_.internal.min_chunk_size, config_.internal.max_chunk_size);
     chunk_size_manager_.set_adaptation_parameters(
@@ -762,7 +762,7 @@ std::unique_ptr<protocol::Message> Client::receive_message() {
     uint32_t length = ntohl(length_net);
 
     // Safety check on length to avoid bad_alloc crash
-    if (length > 64 * 1024 * 1024) {
+    if (length > config::defaults::kMaxFrameSize) {
         throw ProtocolException("Client received a message with length exceeding the 64MB limit: " + std::to_string(length) + " bytes");
     }
 

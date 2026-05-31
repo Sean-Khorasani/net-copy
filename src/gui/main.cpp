@@ -37,6 +37,8 @@ void signal_handler(int sig) {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    std::string config_file_arg;
+
     // 1. Handle command line options
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -52,29 +54,59 @@ int main(int argc, char* argv[]) {
             std::cout << "Options:" << std::endl;
             std::cout << "  -v, --version  Show version information" << std::endl;
             std::cout << "  -h, --help     Show this help message" << std::endl;
+            std::cout << "  -c, --config   Use specified client configuration file" << std::endl;
             return 0;
+        } else if (arg == "--config" || arg == "-c") {
+            if (i + 1 >= argc) {
+                std::cerr << "Error: Missing configuration file argument" << std::endl;
+                return 1;
+            }
+            config_file_arg = argv[++i];
+        } else {
+            std::cerr << "Error: Unknown argument: " << arg << std::endl;
+            return 1;
         }
     }
 
-    // Disable console output for the GUI server, everything goes to log file
-    netcopy::logging::Logger::instance().set_file_output("net_copy_gui.log");
-    netcopy::logging::Logger::instance().set_level(netcopy::logging::LogLevel::INFO);
-    netcopy::logging::Logger::instance().set_console_output(false);
-    
     // Load ClientConfig to get GUI settings
     netcopy::config::ClientConfig config = netcopy::config::ClientConfig::get_default();
+    std::string config_file;
+    bool created_config_file = false;
     try {
-        std::string config_file = "client.conf";
-        if (!netcopy::file::FileManager::exists(config_file)) {
-            config_file = netcopy::common::get_default_config_path("client.conf");
+        if (!config_file_arg.empty()) {
+            config_file = config_file_arg;
+            if (!netcopy::file::FileManager::exists(config_file)) {
+                netcopy::config::ClientConfig::create_default_file(config_file);
+                created_config_file = true;
+            }
+        } else {
+            config_file = netcopy::config::defaults::kClientConfigFileName;
+            if (!netcopy::file::FileManager::exists(config_file)) {
+                std::string default_config = netcopy::common::get_default_config_path(netcopy::config::defaults::kClientConfigFileName);
+                if (netcopy::file::FileManager::exists(default_config)) {
+                    config_file = default_config;
+                } else {
+                    netcopy::config::ClientConfig::create_default_file(config_file);
+                    created_config_file = true;
+                }
+            }
         }
-        if (netcopy::file::FileManager::exists(config_file)) {
-            config = netcopy::config::ClientConfig::load_from_file(config_file);
-            LOG_INFO("Loaded GUI configuration from " + config_file);
-        }
+        config = netcopy::config::ClientConfig::load_from_file(config_file);
     } catch (const std::exception& e) {
-        LOG_ERROR("Failed to load client.conf: " + std::string(e.what()));
+        std::cerr << "Error: Failed to load client configuration: " << e.what() << std::endl;
+        return 1;
     }
+
+    auto& logger = netcopy::logging::Logger::instance();
+    logger.set_level(netcopy::logging::Logger::string_to_level(config.logging.level));
+    logger.set_console_level(netcopy::logging::Logger::string_to_level(config.console.level));
+    logger.set_console_output(config.console.enable);
+    logger.set_json_format(config.logging.format == netcopy::config::defaults::kLogFormatJson);
+    logger.set_file_output(config.logging.enable ? config.logging.file : "");
+    if (created_config_file) {
+        LOG_INFO("Created default client configuration file: " + config_file);
+    }
+    LOG_INFO("Loaded GUI configuration from " + config_file);
 
     // 2. Set up OS shutdown handlers
 #ifdef _WIN32

@@ -51,7 +51,7 @@ void print_usage(const char* program_name) {
 
 struct CommandLineArgs {
     std::string listen_address;
-    uint16_t listen_port = 1245;
+    uint16_t listen_port = netcopy::config::defaults::kDefaultTransferPort;
     std::string access_path;
     std::string config_file;
     bool daemon = false;
@@ -59,7 +59,7 @@ struct CommandLineArgs {
     bool auto_create_directories = true;
     bool auto_create_specified = false;
     bool verbose = false;
-    std::string console_level = "INFO";
+    std::string console_level = netcopy::config::defaults::kLogLevelInfo;
     bool help = false;
     bool version = false;
     bool udp = false;
@@ -221,30 +221,36 @@ int server_main(int argc, char* argv[]) {
         // Initialize server
         netcopy::server::Server server;
         std::string config_path_used;
+        bool created_config_file = false;
 
         // Load configuration
         if (!args.config_file.empty()) {
+            if (!netcopy::file::FileManager::exists(args.config_file)) {
+                netcopy::config::ServerConfig::create_default_file(args.config_file);
+                created_config_file = true;
+            }
             server.load_config(args.config_file);
             config_path_used = args.config_file;
         } else {
             // Try to load config from executable directory first
-            std::string local_config = "server.conf";
+            std::string local_config = netcopy::config::defaults::kServerConfigFileName;
             if (netcopy::file::FileManager::exists(local_config)) {
                 server.load_config(local_config);
                 config_path_used = local_config;
             } else {
                 // Try to load default config from system location
-                std::string default_config = netcopy::common::get_default_config_path("server.conf");
+                std::string default_config = netcopy::common::get_default_config_path(netcopy::config::defaults::kServerConfigFileName);
                 if (netcopy::file::FileManager::exists(default_config)) {
                     server.load_config(default_config);
                     config_path_used = default_config;
                 } else {
-                    LOG_INFO("No configuration file loaded. Using default settings.");
-                    config_path_used = "(default settings)";
+                    netcopy::config::ServerConfig::create_default_file(local_config);
+                    created_config_file = true;
+                    server.load_config(local_config);
+                    config_path_used = local_config;
                 }
             }
         }
-        LOG_INFO("Using server configuration from: " + config_path_used);
         
         // Override config with command line arguments
         auto config = server.get_config();
@@ -308,9 +314,13 @@ int server_main(int argc, char* argv[]) {
             logger.set_console_output(config.console.enable);
         }
         
-        if (!config.logging.file.empty()) {
-            logger.set_file_output(config.logging.file);
+        logger.set_file_output(config.logging.enable ? config.logging.file : "");
+        logger.set_json_format(config.logging.format == netcopy::config::defaults::kLogFormatJson);
+
+        if (created_config_file) {
+            LOG_INFO("Created default server configuration file: " + config_path_used);
         }
+        LOG_INFO("Using server configuration from: " + config_path_used);
         
         // Start server
         if (!args.relay.empty()) {

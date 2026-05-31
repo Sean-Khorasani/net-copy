@@ -702,7 +702,7 @@ std::unique_ptr<protocol::Message> ConnectionHandler::receive_message() {
     uint32_t length = ntohl(length_net);
     
     // Safety check on length to avoid bad_alloc crash
-    if (length > 64 * 1024 * 1024) {
+    if (length > config::defaults::kMaxFrameSize) {
         throw ProtocolException("Server received a message with length exceeding the 64MB limit: " + std::to_string(length) + " bytes");
     }
     
@@ -830,11 +830,10 @@ void Server::load_config(const std::string& config_file) {
         // Initialize logging
         auto& logger = logging::Logger::instance();
         logger.set_level(logging::Logger::string_to_level(config_.logging.level));
+        logger.set_console_level(logging::Logger::string_to_level(config_.console.level));
         logger.set_console_output(config_.console.enable);
-        if (!config_.logging.file.empty()) {
-            logger.set_file_output(config_.logging.file);
-        }
-        logger.set_json_format(config_.logging.format == "json");
+        logger.set_file_output(config_.logging.enable ? config_.logging.file : "");
+        logger.set_json_format(config_.logging.format == config::defaults::kLogFormatJson);
         
         // Initialize audit log if configured
         if (!config_.logging.audit_file.empty()) {

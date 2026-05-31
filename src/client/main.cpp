@@ -72,6 +72,20 @@ struct ProgressState {
     std::unordered_set<std::string> started_files;
     std::unordered_set<std::string> completed_files;
 };
+
+const std::vector<uint8_t> kMasterPasswordSalt = {
+    0x4e, 0x65, 0x74, 0x43, 0x6f, 0x70, 0x79, 0x53,
+    0x61, 0x6c, 0x74, 0x31, 0x32, 0x33, 0x34, 0x35,
+    0x36, 0x37, 0x38, 0x39, 0x30, 0x41, 0x42, 0x43,
+    0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b
+};
+
+const std::vector<uint8_t> kStoredPasswordSalt = {
+    0x6e, 0x63, 0x70, 0x77, 0x64, 0x73, 0x61, 0x6c,
+    0x74, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36
+};
+
+constexpr int kStoredPasswordPbkdf2Iterations = 100000;
 }
 
 struct CommandLineArgs {
@@ -81,13 +95,13 @@ struct CommandLineArgs {
     bool recursive = false;
     bool resume = false;
     bool verbose = false;
-    std::string console_level = "INFO";
+    std::string console_level = netcopy::config::defaults::kLogLevelInfo;
     bool help = false;
     bool download = false;
     uint16_t server_port = 0; // Added for client port
     bool empty_dirs_specified = false; // Track if user specified --no-empty-dirs
-    bool create_empty_directories = true; // Default value
-    bool auto_create_directories = true;
+    bool create_empty_directories = netcopy::config::defaults::kCreateEmptyDirectories;
+    bool auto_create_directories = netcopy::config::defaults::kAutoCreateDirectories;
     bool auto_create_specified = false;
     netcopy::crypto::SecurityLevel security_level = netcopy::crypto::SecurityLevel::HIGH;
     bool force = false;
@@ -272,23 +286,31 @@ int client_main(int argc, char* argv[]) {
         
         // Load configuration
         std::string config_path_used;
+        bool created_config_file = false;
         if (!args.config_file.empty()) {
+            if (!netcopy::file::FileManager::exists(args.config_file)) {
+                netcopy::config::ClientConfig::create_default_file(args.config_file);
+                created_config_file = true;
+            }
             client.load_config(args.config_file);
             config_path_used = args.config_file;
         } else {
             // Try to load config from executable directory first
-            std::string local_config = "client.conf";
+            std::string local_config = netcopy::config::defaults::kClientConfigFileName;
             if (netcopy::file::FileManager::exists(local_config)) {
                 client.load_config(local_config);
                 config_path_used = local_config;
             } else {
                 // Try to load default config from system location
-                std::string default_config = netcopy::common::get_default_config_path("client.conf");
+                std::string default_config = netcopy::common::get_default_config_path(netcopy::config::defaults::kClientConfigFileName);
                 if (netcopy::file::FileManager::exists(default_config)) {
                     client.load_config(default_config);
                     config_path_used = default_config;
                 } else {
-                    config_path_used = "(default settings)";
+                    netcopy::config::ClientConfig::create_default_file(local_config);
+                    created_config_file = true;
+                    client.load_config(local_config);
+                    config_path_used = local_config;
                 }
             }
         }
@@ -296,26 +318,27 @@ int client_main(int argc, char* argv[]) {
         // Override config with command line arguments
         auto config = client.get_config(); 
         // Note: verbose console level settings are processed in logger reconfiguration below
+        std::vector<std::string> pending_verbose_logs;
         
         // Override config with command line arguments only if specified
         if (args.empty_dirs_specified) {
             config.create_empty_directories = args.create_empty_directories;
             if (args.verbose) {
-                std::cout << "Command line override: create_empty_directories = " << 
-                            (config.create_empty_directories ? "true" : "false") << std::endl;
+                pending_verbose_logs.push_back("Command line override: create_empty_directories = " +
+                                               std::string(config.create_empty_directories ? "true" : "false"));
             }
         } else {
             if (args.verbose) {
-                std::cout << "Config setting: create_empty_directories = " << 
-                            (config.create_empty_directories ? "true" : "false") << std::endl;
+                pending_verbose_logs.push_back("Config setting: create_empty_directories = " +
+                                               std::string(config.create_empty_directories ? "true" : "false"));
             }
         }
 
         if (args.auto_create_specified) {
             config.auto_create_directories = args.auto_create_directories;
             if (args.verbose) {
-                std::cout << "Command line override: auto_create_directories = " << 
-                            (config.auto_create_directories ? "true" : "false") << std::endl;
+                pending_verbose_logs.push_back("Command line override: auto_create_directories = " +
+                                               std::string(config.auto_create_directories ? "true" : "false"));
             }
         }
         
@@ -328,21 +351,14 @@ int client_main(int argc, char* argv[]) {
             
             // Derive key from password using a fixed salt for consistency
             // This ensures the same password always generates the same key
-            std::vector<uint8_t> fixed_salt = {
-                0x4e, 0x65, 0x74, 0x43, 0x6f, 0x70, 0x79, 0x53,
-                0x61, 0x6c, 0x74, 0x31, 0x32, 0x33, 0x34, 0x35,
-                0x36, 0x37, 0x38, 0x39, 0x30, 0x41, 0x42, 0x43,
-                0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a, 0x4b
-            };
-            
-            auto key = netcopy::crypto::ChaCha20Poly1305::derive_key(password, fixed_salt);
+            auto key = netcopy::crypto::ChaCha20Poly1305::derive_key(password, kMasterPasswordSalt);
             
             // Convert to hex string format
             config.internal.secret_key = "0x" + netcopy::common::to_hex_string(
                 std::vector<uint8_t>(key.begin(), key.end()));
             
             if (args.verbose) {
-                std::cout << "Generated secret key from password." << std::endl;
+                pending_verbose_logs.push_back("Generated secret key from password.");
             }
         }
 
@@ -352,9 +368,7 @@ int client_main(int argc, char* argv[]) {
             if (master.empty()) {
                 master = netcopy::common::get_password_from_console("Enter passphrase to decrypt stored password: ");
             }
-            std::vector<uint8_t> salt = {0x6e,0x63,0x70,0x77,0x64,0x73,0x61,0x6c,
-                                          0x74,0x30,0x31,0x32,0x33,0x34,0x35,0x36};
-            auto dk = netcopy::crypto::pbkdf2_sha3_256(master, salt, 100000, 64);
+            auto dk = netcopy::crypto::pbkdf2_sha3_256(master, kStoredPasswordSalt, kStoredPasswordPbkdf2Iterations, 64);
             std::vector<uint8_t> aes_key(dk.begin(), dk.begin() + 32);
             std::vector<uint8_t> hmac_key(dk.begin() + 32, dk.end());
 
@@ -394,13 +408,19 @@ int client_main(int argc, char* argv[]) {
         }
         
         logger.set_json_format(config.logging.format == "json");
-        if (!config.logging.file.empty()) {
-            logger.set_file_output(config.logging.file);
-        }
+        logger.set_file_output(config.logging.enable ? config.logging.file : "");
         
+        if (created_config_file) {
+            LOG_INFO("Created default client configuration file: " + config_path_used);
+        }
+
+        for (const auto& message : pending_verbose_logs) {
+            LOG_INFO(message);
+        }
+
         // Log configuration loaded message only in verbose mode (after logger is reconfigured)
         if (args.verbose) {
-            std::cout << "Client configuration loaded from: " << config_path_used << std::endl;
+            LOG_INFO("Client configuration loaded from: " + config_path_used);
         }
 
         // Parse destination (or source if downloading) - support multiple formats:
@@ -532,7 +552,7 @@ int client_main(int argc, char* argv[]) {
         
         // Set default port if not specified
         if (server_port == 0) {
-            server_port = 1245; // Default port
+            server_port = netcopy::config::defaults::kDefaultTransferPort;
         }
         
         // Normalize remote path based on detected format
@@ -552,9 +572,9 @@ int client_main(int argc, char* argv[]) {
         
         // Debug output for path handling
         if (args.verbose) {
-            std::cout << "Platform: " << (netcopy::common::is_windows_platform() ? "Windows" : "Unix") << std::endl;
-            std::cout << "Remote path (network format): " << remote_path << std::endl;
-            std::cout << "Remote path (native format): " << netcopy::common::convert_to_native_path(remote_path) << std::endl;
+            LOG_INFO("Platform: " + std::string(netcopy::common::is_windows_platform() ? "Windows" : "Unix"));
+            LOG_INFO("Remote path (network format): " + remote_path);
+            LOG_INFO("Remote path (native format): " + netcopy::common::convert_to_native_path(remote_path));
         }
 
         // Set security level before connecting
@@ -571,24 +591,24 @@ int client_main(int argc, char* argv[]) {
                 case netcopy::crypto::SecurityLevel::AES:
                     level_name = "AES (AES-CTR with hardware acceleration)";
                     // Show detailed AES acceleration information
-                    std::cout << netcopy::crypto::AesCtr::get_detailed_acceleration_info() << std::endl;
+                    LOG_INFO(netcopy::crypto::AesCtr::get_detailed_acceleration_info());
                     break;
                 case netcopy::crypto::SecurityLevel::AES_256_GCM:
                     level_name = "AES-256-GCM (GPU accelerated)";
                     // Show detailed GPU acceleration information
-                    std::cout << netcopy::crypto::Aes256GcmGpu::get_detailed_gpu_info() << std::endl;
+                    LOG_INFO(netcopy::crypto::Aes256GcmGpu::get_detailed_gpu_info());
                     break;
             }
-            std::cout << "Security level: " << level_name << std::endl;
-            std::cout << "Connecting to " << server_address << ":" << server_port << std::endl;
+            LOG_INFO("Security level: " + level_name);
+            LOG_INFO("Connecting to " + server_address + ":" + std::to_string(server_port));
         }
         if (args.security_level == netcopy::crypto::SecurityLevel::FAST) {
-            std::cerr << "WARNING: 'fast' mode uses XOR cipher which provides NO real security. Use only on trusted local networks." << std::endl;
+            LOG_WARNING("'fast' mode uses XOR cipher which provides NO real security. Use only on trusted local networks.");
         }
 
         client.connect(server_address, server_port);
         if (args.verbose) {
-            std::cout << "Connected successfully" << std::endl;
+            LOG_INFO("Connected successfully");
         }
 
 #ifdef _WIN32
