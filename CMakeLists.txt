@@ -148,6 +148,7 @@ set(COMMON_SOURCES
     src/crypto/aes_ctr.cpp
     src/crypto/crypto_engine.cpp
     src/crypto/sha3.cpp
+    src/crypto/xxhash64.cpp
     src/crypto/mlkem.cpp
     src/crypto/key_manager.cpp
     src/network/socket.cpp
