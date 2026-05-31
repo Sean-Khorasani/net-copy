@@ -5,6 +5,7 @@
 #include "network/event_loop.h"
 #include "crypto/chacha20_poly1305.h"
 #include "crypto/crypto_engine.h"
+#include "crypto/sha3.h"
 #include "config/config_parser.h"
 #include "protocol/message.h"
 #include "common/chunk_size_manager.h"
@@ -159,6 +160,17 @@ public:
         cv_producer_.notify_one();
         return true;
     }
+
+    bool try_pop(ReadAheadChunk& chunk) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (queue_.empty()) {
+            return false;
+        }
+        chunk = std::move(queue_.front());
+        queue_.pop();
+        cv_producer_.notify_one();
+        return true;
+    }
     
     void set_finished() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -291,7 +303,8 @@ private:
                          common::ChunkSizeManager& shared_chunk_manager,
                          common::BandwidthMonitor& shared_bandwidth_monitor,
                          const std::function<void(uint64_t)>& progress_delta_callback,
-                         bool is_final_range = false);
+                         bool is_final_range = false,
+                         crypto::Sha3Hasher* stream_hasher = nullptr);
     uint32_t choose_parallel_stream_count(uint64_t transfer_size) const;
     void send_file_request(const std::string& local_path,
                            const std::string& remote_path,

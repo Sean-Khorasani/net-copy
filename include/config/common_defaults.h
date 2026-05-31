@@ -19,6 +19,15 @@ inline constexpr size_t kMaxChunkSize = 10485760;
 inline constexpr size_t kMaxFrameSize = 64 * 1024 * 1024;
 inline constexpr double kChunkSizeIncreaseFactor = 1.1;
 inline constexpr double kChunkSizeDecreaseFactor = 0.5;
+inline constexpr uint64_t kDefaultInflightWindowBytes = 64ull * 1024ull * 1024ull;
+inline constexpr uint64_t kDefaultBatchBytes = 0;
+inline constexpr int kDefaultBatchChunks = 1;
+inline constexpr bool kDefaultPreallocateFiles = false;
+inline constexpr bool kDefaultTrustedSkipZeroFill = false;
+inline constexpr bool kDefaultCacheHints = false;
+inline constexpr bool kDefaultStreamingVerification = false;
+inline constexpr bool kDefaultTcpInfoWindow = false;
+inline constexpr int kMaxBatchChunks = 64;
 
 inline constexpr const char* kProtocolInternal = "internal";
 inline constexpr const char* kProtocolSsh = "ssh";

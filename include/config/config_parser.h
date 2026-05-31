@@ -86,6 +86,14 @@ struct ServerConfig {
         bool allow_anonymous = defaults::kServerAllowAnonymous;
         size_t max_chunk_size = defaults::kMaxChunkSize;
         bool adaptive_chunk_size = defaults::kServerAdaptiveChunkSize;
+        uint64_t inflight_window_bytes = defaults::kDefaultInflightWindowBytes;
+        uint64_t batch_bytes = defaults::kDefaultBatchBytes;
+        int batch_chunks = defaults::kDefaultBatchChunks;
+        bool preallocate_files = defaults::kDefaultPreallocateFiles;
+        bool trusted_skip_zero_fill = defaults::kDefaultTrustedSkipZeroFill;
+        bool cache_hints = defaults::kDefaultCacheHints;
+        bool streaming_verification = defaults::kDefaultStreamingVerification;
+        bool tcp_info_window = defaults::kDefaultTcpInfoWindow;
     } internal;
     
     struct ProtocolTls {
@@ -168,6 +176,13 @@ struct ClientConfig {
         size_t max_chunk_size = defaults::kMaxChunkSize;
         double chunk_size_increase_factor = defaults::kChunkSizeIncreaseFactor;
         double chunk_size_decrease_factor = defaults::kChunkSizeDecreaseFactor;
+        uint64_t inflight_window_bytes = defaults::kDefaultInflightWindowBytes;
+        uint64_t batch_bytes = defaults::kDefaultBatchBytes;
+        int batch_chunks = defaults::kDefaultBatchChunks;
+        bool preallocate_files = defaults::kDefaultPreallocateFiles;
+        bool cache_hints = defaults::kDefaultCacheHints;
+        bool streaming_verification = defaults::kDefaultStreamingVerification;
+        bool tcp_info_window = defaults::kDefaultTcpInfoWindow;
     } internal;
     
     struct ProtocolTls {

@@ -3,6 +3,7 @@
 #include "network/socket.h"
 #include "crypto/chacha20_poly1305.h"
 #include "crypto/crypto_engine.h"
+#include "crypto/sha3.h"
 #include "config/config_parser.h"
 #include "protocol/message.h"
 #include "file/file_manager.h"
@@ -53,6 +54,16 @@ private:
     uint32_t current_permissions_ = 0;
     uint64_t current_expected_file_size_ = 0;
     uint64_t current_expected_last_modified_ = 0;
+    bool current_preallocated_ = false;
+    std::unique_ptr<crypto::Sha3Hasher> current_upload_hasher_;
+    uint64_t current_upload_hash_next_offset_ = 0;
+    bool current_upload_hash_valid_ = false;
+    std::vector<uint8_t> last_received_file_hash_;
+    std::string last_received_file_hash_path_;
+    bool last_received_file_hash_valid_ = false;
+    std::vector<uint8_t> last_sent_file_hash_;
+    std::string last_sent_file_hash_path_;
+    bool last_sent_file_hash_valid_ = false;
     // Auth state
     auth::UserDb user_db_;
     std::string authenticated_user_;

@@ -84,6 +84,7 @@ public:
 
     // Data operations
     size_t send(const void* data, size_t length);
+    size_t send_vectored(const void* first, size_t first_length, const void* second, size_t second_length);
     size_t receive(void* buffer, size_t length);
 
     // Socket options

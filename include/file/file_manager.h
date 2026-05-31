@@ -10,6 +10,12 @@
 namespace netcopy {
 namespace file {
 
+enum class FileAccessPattern {
+    Normal,
+    Sequential,
+    Random
+};
+
 class FileManager {
 public:
     struct FileInfo {
@@ -50,8 +56,9 @@ public:
     static std::vector<uint8_t> read_file_chunk(const std::string& path, uint64_t offset, size_t chunk_size = 0);
     static void write_file_chunk(const std::string& path, uint64_t offset, const std::vector<uint8_t>& data, bool auto_create = true, bool truncate_on_zero = true);
     static void create_file(const std::string& path, uint64_t size = 0, bool auto_create = true);
+    static bool preallocate_file(const std::string& path, uint64_t size, bool auto_create = true, bool allow_set_valid_data = false, std::string* error_message = nullptr);
     static std::vector<uint8_t> compute_file_hash(const std::string& path, const std::function<bool()>& should_cancel = {});
-    static std::vector<BlockHash> compute_block_hashes(const std::string& path, uint64_t block_size, const std::function<bool()>& should_cancel = {});
+    static std::vector<BlockHash> compute_block_hashes(const std::string& path, uint64_t block_size, const std::function<bool()>& should_cancel = {}, std::vector<uint8_t>* file_hash = nullptr);
     
     // Resume support
     static uint64_t get_partial_file_size(const std::string& path);
@@ -105,8 +112,8 @@ public:
     FileStream(FileStream&& other) noexcept;
     FileStream& operator=(FileStream&& other) noexcept;
     
-    bool open_read(const std::string& path);
-    bool open_write(const std::string& path, bool truncate_on_zero = true, bool auto_create = true);
+    bool open_read(const std::string& path, FileAccessPattern access_pattern = FileAccessPattern::Normal);
+    bool open_write(const std::string& path, bool truncate_on_zero = true, bool auto_create = true, FileAccessPattern access_pattern = FileAccessPattern::Normal);
     
     size_t read(uint64_t offset, uint8_t* buffer, size_t size);
     void write(uint64_t offset, const uint8_t* data, size_t size);

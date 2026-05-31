@@ -31,6 +31,7 @@
 #include <memory>
 #include <string>
 #include <functional>
+#include <vector>
 
 namespace netcopy {
 namespace network {
@@ -62,6 +63,7 @@ public:
     // Async I/O operations
     void async_read(void* buffer, size_t length, std::function<void(ErrorCode, size_t)> handler);
     void async_write(const void* buffer, size_t length, std::function<void(ErrorCode, size_t)> handler);
+    void async_write(const std::vector<asio::const_buffer>& buffers, std::function<void(ErrorCode, size_t)> handler);
 
     // Zero-copy file send using TransmitFile / sendfile natively
     // On failure or unsupported platforms, falls back to fast_mem user-space copying
