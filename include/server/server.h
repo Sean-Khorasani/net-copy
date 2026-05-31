@@ -64,6 +64,14 @@ private:
     std::vector<uint8_t> last_sent_file_hash_;
     std::string last_sent_file_hash_path_;
     bool last_sent_file_hash_valid_ = false;
+    // Cached full-file hash from block-hashing (avoids re-hashing during E2E verify)
+    std::vector<uint8_t> cached_block_full_hash_;
+    std::string cached_block_hash_path_;
+    bool cached_block_hash_valid_ = false;
+    // True when handle_block_hashes_request was called for the current file.
+    // Lets handle_file_verify_request know that block-level integrity was
+    // already verified, so a redundant full-file re-read can be skipped.
+    bool block_hashes_were_computed_ = false;
     // Auth state
     auth::UserDb user_db_;
     std::string authenticated_user_;

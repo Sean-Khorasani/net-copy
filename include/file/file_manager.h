@@ -59,6 +59,10 @@ public:
     static bool preallocate_file(const std::string& path, uint64_t size, bool auto_create = true, bool allow_set_valid_data = false, std::string* error_message = nullptr);
     static std::vector<uint8_t> compute_file_hash(const std::string& path, const std::function<bool()>& should_cancel = {});
     static std::vector<BlockHash> compute_block_hashes(const std::string& path, uint64_t block_size, const std::function<bool()>& should_cancel = {}, std::vector<uint8_t>* file_hash = nullptr);
+
+    // Adaptive block size for delta-sync: balances granularity with hash overhead.
+    // Returns a block size between 64 KB and 8 MB scaled by total file size.
+    static uint64_t compute_optimal_block_size(uint64_t file_size);
     
     // Resume support
     static uint64_t get_partial_file_size(const std::string& path);
